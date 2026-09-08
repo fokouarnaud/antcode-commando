@@ -36,7 +36,7 @@ flowchart LR
     CSV --> RAW
     RAW --> PIPE
     PIPE --> CUST & ADDR & PROD & ORD & ITEMS
-    MOMO -->|POST + X-Webhook-Token| HOOK
+    MOMO -->|POST + X-Momo-Signature HMAC| HOOK
     HOOK -->|idempotent insert| PAY
     HOOK -->|update payment_status| ORD
     ORD --> ORD_R
@@ -58,7 +58,7 @@ app/
   __init__.py          create_app() factory, registers all blueprints
   database.py           get_connection(), init_db()
   schema.sql             the 6-table schema + indexes
-  openapi.py              hand-authored OpenAPI 3.0 spec
+  openapi.json             OpenAPI 3.0 spec (static file, served as-is)
   routes/
     orders.py              GET /orders, GET /orders/{id}
     webhooks.py             POST /webhook/momo
@@ -100,7 +100,7 @@ reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
 |---|---|---|
 | `/orders` | GET | List orders, optional `?neighborhood=` and/or `?status=` filters — served by `idx_orders_neighborhood_status` |
 | `/orders/{order_id}` | GET | Fetch a single order (404 if unknown) |
-| `/webhook/momo` | POST | MTN MoMo / Orange Money payment callback. Requires `X-Webhook-Token` header. Idempotent on `external_transaction_id` |
+| `/webhook/momo` | POST | MTN MoMo / Orange Money payment callback. Requires `X-Momo-Signature`: hex HMAC-SHA256 of the raw body, keyed with `MOMO_WEBHOOK_SECRET`. Idempotent on `external_transaction_id` |
 | `/docs` | GET | Interactive Scalar API reference — try both endpoints above from the browser |
 | `/openapi.json` | GET | OpenAPI 3.0 spec backing `/docs` |
 
@@ -110,7 +110,7 @@ reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
 python -m pytest -v
 ```
 
-30 tests, 100% passing. Every behavior above — including the schema, the
+32 tests, 100% passing. Every behavior above — including the schema, the
 ETL, the indexing, and the webhook — was written test-first: a failing test
 proving the gap, then the minimal code to close it, per the project's
 [TDD skill](.agents/skills/test-driven-development/SKILL.md).
@@ -172,6 +172,17 @@ backstop), and proven by
 which posts the identical callback twice and asserts exactly one payment
 row exists afterward.
 
+Authenticity is checked with a real HMAC, not a bare shared secret: the
+caller sends `X-Momo-Signature`, the hex HMAC-SHA256 of the *raw request
+body* keyed with `MOMO_WEBHOOK_SECRET`
+(`app/routes/webhooks.py::_has_valid_signature`, compared with
+`hmac.compare_digest` to avoid timing attacks). That binds the signature to
+the exact bytes received, so a signature computed over one payload will not
+validate a tampered one — proven by
+`test_momo_webhook_rejects_tampered_payload_even_with_valid_looking_signature`,
+which reuses a genuine signature against a modified `amount_fcfa` and
+asserts it's rejected.
+
 ## AI Prompt Ledger
 
 This project was built with Claude Code, directed through three recurring
@@ -192,6 +203,7 @@ loop).
 | Phase 3: Data Pipeline, Indexing, Webhooks | `/goal` | ETL from `ecommerce_orders_raw` into the 6 tables with neighborhood normalization; `idx_orders_neighborhood_status`; `docs/indexing_and_query_optimization_report.md`; idempotent `POST /webhook/momo` | Schema migration, `pipeline.py`, indexing report, webhook route/service — 24 tests passing |
 | — | `/clear` | Context reset before Phase 4 | — |
 | Phase 4: Final Validation | `/goal` | `/docs` interactive API reference (Scalar), order lookup endpoints, this README, full-suite green check | `app/openapi.py`, `app/routes/docs.py`, order lookup routes, this README — 30 tests passing |
+| Phase 5: Consolidation & HMAC hardening | `/goal` (same session, no `/clear` before it) | Re-verify all prior phases against elite architecture specs; upgrade webhook auth from a bare shared-secret header to a real HMAC-SHA256 signature over the raw body; move the OpenAPI spec from a Python dict to a static `app/openapi.json` file | `_has_valid_signature()` in `app/routes/webhooks.py`, `app/openapi.json` (replaces `app/openapi.py`), 2 new tests (missing/wrong-secret signature, tampered-payload rejection) — 32 tests passing |
 
 Each `/goal` phase followed the same discipline: RED (failing test proving
 the gap) → GREEN (minimal code to close it) → REFACTOR (clean up without

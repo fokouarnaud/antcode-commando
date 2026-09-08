@@ -1,6 +1,9 @@
+import json
+import pathlib
+
 from flask import Blueprint, jsonify
 
-from app.openapi import OPENAPI_SPEC
+OPENAPI_PATH = pathlib.Path(__file__).parent.parent / "openapi.json"
 
 docs_bp = Blueprint("docs", __name__)
 
@@ -21,7 +24,8 @@ _DOCS_PAGE = """<!doctype html>
 
 @docs_bp.route("/openapi.json", methods=["GET"])
 def openapi_json():
-    return jsonify(OPENAPI_SPEC), 200
+    spec = json.loads(OPENAPI_PATH.read_text())
+    return jsonify(spec), 200
 
 
 @docs_bp.route("/docs", methods=["GET"])
