@@ -1,0 +1,4 @@
+flask
+pytest
+pandas
+numpy
