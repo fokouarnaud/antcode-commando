@@ -63,3 +63,26 @@ def test_init_db_creates_composite_neighborhood_index():
         ).fetchall()
     }
     assert index_columns == {"neighborhood", "city"}
+
+
+def test_orders_table_has_neighborhood_and_delivery_status_columns():
+    conn = get_connection(":memory:")
+
+    init_db(conn)
+
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(orders)").fetchall()}
+    assert {"customer_neighborhood", "delivery_status", "external_ref"} <= columns
+
+
+def test_init_db_creates_orders_neighborhood_status_index():
+    conn = get_connection(":memory:")
+
+    init_db(conn)
+
+    index_columns = [
+        row["name"]
+        for row in conn.execute(
+            "PRAGMA index_info(idx_orders_neighborhood_status)"
+        ).fetchall()
+    ]
+    assert index_columns == ["customer_neighborhood", "delivery_status"]
