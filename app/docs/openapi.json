@@ -79,6 +79,44 @@
           }
         }
       },
+      "Payment": {
+        "type": "object",
+        "properties": {
+          "payment_id": { "type": "integer" },
+          "order_id": { "type": "string", "example": "ECM-00001" },
+          "provider": { "type": "string", "example": "geniuspay" },
+          "external_transaction_id": { "type": "string", "example": "MTX-A1B2C3D4E5" },
+          "amount_fcfa": { "type": "integer", "example": 75000 },
+          "status": {
+            "type": "string",
+            "example": "Successful",
+            "enum": ["Pending", "Successful", "Failed"]
+          },
+          "received_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "PaymentWithOrder": {
+        "description": "Shape returned by GET /payments/{external_transaction_id}: the payment plus its order nested under \"order\", so a support agent gets the full picture in one lookup.",
+        "allOf": [
+          { "$ref": "#/components/schemas/Payment" },
+          {
+            "type": "object",
+            "properties": {
+              "order": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "order_id": { "type": "string", "example": "ECM-00001" },
+                  "delivery_status": { "type": "string", "enum": ["Pending", "Shipped", "Delivered"] },
+                  "payment_status": { "type": "string", "enum": ["Pending", "Paid", "Failed"] },
+                  "customer_name": { "type": "string", "example": "Amina Njoya" },
+                  "customer_phone": { "type": "string", "example": "+237690000001" }
+                }
+              }
+            }
+          }
+        ]
+      },
       "Pagination": {
         "type": "object",
         "properties": {
@@ -443,6 +481,121 @@
           "204": { "description": "Deleted" },
           "404": { "description": "customer_id does not exist" },
           "409": { "description": "customer has existing orders" }
+        }
+      }
+    },
+    "/payments": {
+      "get": {
+        "summary": "List payment transaction logs (paginated, newest first)",
+        "description": "Ordered by payment_id DESC so the first page always shows the most recent transaction activity.",
+        "parameters": [
+          { "name": "page", "in": "query", "required": false, "schema": { "type": "integer", "default": 1 } },
+          { "name": "per_page", "in": "query", "required": false, "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching payments, paginated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Payment" } },
+                    "pagination": { "$ref": "#/components/schemas/Pagination" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Manually record a payment (offline cash reconciliation, direct bank wire)",
+        "description": "Enforces the same UNIQUE(provider, external_transaction_id) constraint the webhook path relies on for idempotency -- a manual entry can't silently shadow or collide with a real callback.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["order_id", "provider", "external_transaction_id", "amount_fcfa"],
+                "properties": {
+                  "order_id": { "type": "string", "example": "ECM-00001" },
+                  "provider": { "type": "string", "example": "cash" },
+                  "external_transaction_id": { "type": "string", "example": "CASH-RECEIPT-0001" },
+                  "amount_fcfa": { "type": "integer", "example": 75000 },
+                  "status": {
+                    "type": "string",
+                    "enum": ["Pending", "Successful", "Failed"],
+                    "default": "Pending"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Payment created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Payment" } } } },
+          "400": { "description": "Missing required field, non-positive amount_fcfa, or invalid status" },
+          "404": { "description": "order_id does not exist" },
+          "409": { "description": "a payment with this provider and external_transaction_id already exists" }
+        }
+      }
+    },
+    "/payments/{external_transaction_id}": {
+      "get": {
+        "summary": "Fetch a payment's complete details by its provider transaction token",
+        "description": "Returns the payment with its order nested under \"order\" -- the full picture in one lookup, e.g. for a quick verification right after a webhook resolves.",
+        "parameters": [
+          {
+            "name": "external_transaction_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "example": "MTX-A1B2C3D4E5" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "The payment, with its order nested", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentWithOrder" } } } },
+          "404": { "description": "No payment matches that external_transaction_id" }
+        }
+      }
+    },
+    "/payments/{payment_id}": {
+      "put": {
+        "summary": "Update a payment's operational status or reference code",
+        "description": "Only status and external_transaction_id are mutable -- order_id, provider, and amount_fcfa are immutable business facts once recorded.",
+        "parameters": [
+          { "name": "payment_id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": { "type": "string", "enum": ["Pending", "Successful", "Failed"] },
+                  "external_transaction_id": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Updated payment", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Payment" } } } },
+          "400": { "description": "Invalid status, or an empty external_transaction_id" },
+          "404": { "description": "payment_id does not exist" },
+          "409": { "description": "the new external_transaction_id collides with another payment under the same provider" }
+        }
+      },
+      "delete": {
+        "summary": "Delete a payment log entry",
+        "parameters": [
+          { "name": "payment_id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "204": { "description": "Deleted" },
+          "404": { "description": "payment_id does not exist" }
         }
       }
     },

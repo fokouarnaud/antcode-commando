@@ -10,6 +10,7 @@ def create_app():
     from app.routes.customers import customers_bp
     from app.routes.docs import docs_bp
     from app.routes.orders import orders_bp
+    from app.routes.payments import payments_bp
     from app.routes.products import products_bp
     from app.routes.webhooks import webhooks_bp
 
@@ -17,6 +18,7 @@ def create_app():
     app.register_blueprint(orders_bp)
     app.register_blueprint(products_bp)
     app.register_blueprint(customers_bp)
+    app.register_blueprint(payments_bp)
     app.register_blueprint(docs_bp)
 
     @app.teardown_appcontext

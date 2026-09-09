@@ -36,6 +36,7 @@ flowchart LR
         CUST_R["POST /customers\nGET/PUT/DELETE /customers/{id}\napp/routes/customers.py"]
         ORD_R["GET/POST /orders\nGET/PUT/DELETE /orders/{id}\napp/routes/orders.py"]
         CHECKOUT_R["POST /orders/{id}/checkout"]
+        PAY_R["GET/POST /payments\nGET /payments/{ref}\nPUT/DELETE /payments/{id}\napp/routes/payments.py"]
         HOOK_R["POST /webhook/{provider}\napp/routes/webhooks.py"]
         DOCS_R["GET /docs, GET /openapi.json\napp/routes/docs.py"]
     end
@@ -52,7 +53,8 @@ flowchart LR
     PROVIDER -->|HMAC-SHA256 signed| HOOK_R
     HOOK_R -->|idempotent insert| PAY
     HOOK_R -->|update payment_status| ORD
-    JURY --> PROD_R & CUST_R & ORD_R & CHECKOUT_R & DOCS_R
+    PAY_R -->|CRUD| PAY
+    JURY --> PROD_R & CUST_R & ORD_R & CHECKOUT_R & PAY_R & DOCS_R
     DOCS_R -->|serves| DOCS_SPEC
 ```
 
@@ -78,12 +80,14 @@ app/
 │   ├── customers.py                # POST /customers, GET/PUT/DELETE /customers/{id}
 │   ├── docs.py                     # GET /docs (Scalar UI), GET /openapi.json
 │   ├── orders.py                   # GET/POST /orders, GET/PUT/DELETE /orders/{id}, checkout, sync
+│   ├── payments.py                 # GET/POST /payments, GET by transaction id, PUT/DELETE /payments/{id}
 │   ├── products.py                 # GET/POST /products, PUT/DELETE /products/{id}
 │   └── webhooks.py                 # POST /webhook/{provider}
 └── services/
     ├── customers.py                # customer + address CRUD
     ├── geniuspay.py                 # GeniusPay checkout session initiation
     ├── orders.py                   # order CRUD, lookup, pagination, offline sync
+    ├── payments.py                 # payment ledger CRUD (manual reconciliation/corrections)
     ├── products.py                 # product CRUD
     └── webhooks.py                 # idempotent multi-provider callback processing
 scripts/
@@ -97,6 +101,7 @@ tests/
 ├── test_docs_routes.py
 ├── test_geniuspay.py
 ├── test_orders_routes.py
+├── test_payments_routes.py
 ├── test_products_routes.py
 ├── test_seed_cameroon_volume.py
 ├── test_settings.py
@@ -167,6 +172,11 @@ reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
 | `/customers/{id}` | GET | Fetch a customer with its nested `addresses`. 404 if unknown |
 | `/customers/{id}` | PUT | Updates customer fields and/or its primary address's fields. 404 if unknown, 409 on a phone taken by another customer |
 | `/customers/{id}` | DELETE | Deletes a customer and its addresses. 404 if unknown, 409 if the customer has existing orders |
+| `/payments` | GET | Paginated payment ledger, newest first (`ORDER BY payment_id DESC`) |
+| `/payments` | POST | Manually records a payment (offline cash, direct bank wire), enforcing `UNIQUE(provider, external_transaction_id)`. 400 on invalid fields, 404 if `order_id` doesn't exist, 409 on a duplicate `(provider, external_transaction_id)` |
+| `/payments/{external_transaction_id}` | GET | Fetches a payment's full details with its order nested under `"order"`. 404 if no payment matches |
+| `/payments/{payment_id}` | PUT | Updates `status` and/or `external_transaction_id` only — `order_id`/`provider`/`amount_fcfa` are immutable. 400 on invalid status, 404 if unknown, 409 on a reference collision |
+| `/payments/{payment_id}` | DELETE | Deletes a payment log entry. 404 if unknown |
 | `/webhook/{provider}` | POST | Payment callback for the named provider (`momo`, `orange`, `campay`, `smobilpay`, `geniuspay`). Requires that provider's own signature header (e.g. `X-Momo-Signature`, `X-Campay-Signature`, or `X-Webhook-Signature` + `X-Webhook-Timestamp` + `X-Webhook-Event` for `geniuspay`) keyed with its own secret, resolved dynamically from `_PROVIDER_CONFIG`. Idempotent on `(provider, external_transaction_id)`; an unrecognized `provider` returns 500 |
 | `/webhook/simulate-carrier` | POST | **Dev-only** (404s unless the app runs with `debug=True`): bypasses signature verification entirely to fire a `momo`/`orange` callback straight from the Scalar UI, for demoing the payment lifecycle without hand-computing an HMAC. Never enable `debug` in production |
 | `/docs` | GET | Interactive Scalar API reference — try all endpoints above from the browser |
@@ -258,6 +268,17 @@ curl http://127.0.0.1:5000/orders/GPAY-DEMO-01      # if you used Option A
 curl http://127.0.0.1:5000/orders/SIM-DEMO-01       # if you used Option B
 ```
 
+A quick verification lookup showcasing the same transaction reference
+against the payments ledger directly (`GET /payments/{external_transaction_id}`,
+`app/routes/payments.py`) — the payment plus its order nested under
+`"order"`, so a support agent double-checking a webhook's effect gets the
+full picture in one call, right after the callback resolves:
+
+```bash
+curl http://127.0.0.1:5000/payments/GPAY-DEMO-01    # if you used Option A
+curl http://127.0.0.1:5000/payments/SIM-DEMO-01     # if you used Option B
+```
+
 #### Scenario 3 — Double-Entry Replay Attack Safeguard
 
 Resend the *exact same* request from Scenario 2 (identical
@@ -288,7 +309,7 @@ in the schema) catches it before any insert, exactly as proven by
 python -m pytest -v
 ```
 
-115 tests, 100% passing (`python -m pytest -v`). Every behavior above —
+135 tests, 100% passing (`python -m pytest -v`). Every behavior above —
 including the schema, the CRUD services/routes, the dual-engine connection
 layer, the multi-provider webhooks, the GeniusPay checkout/webhook
 lifecycle, the offline sync endpoint, the seeder, and the paginated order
@@ -453,6 +474,7 @@ TDD red/green/refactor loop.
 | Phase 15: Clean CRUD architecture + Cameroonian seeder | `/goal` | Deleted the ETL demo (`scripts/generate_mock_transactions.py`, `scripts/load_structured_orders.py`, `app/services/pipeline.py`, `ecommerce_orders_raw`); dropped `order_items` and the denormalized `orders.customer_neighborhood` column, replaced by a direct `orders.product_id`/`quantity`/`unit_price_fcfa` and a join to `addresses`; renamed `idx_orders_neighborhood_status` to `idx_orders_delivery_status`; added full CRUD (`app/services/products.py`, `app/services/customers.py`, `app/routes/products.py`, `app/routes/customers.py`, plus `POST`/`PUT`/`DELETE /orders/{id}`); added `scripts/seed_cameroon_volume.py` (500 Cameroonian orders via `get_connection()`/`format_query()`) | 102 tests passing (new `test_products_routes.py`, `test_customers_routes.py`, `test_seed_cameroon_volume.py`; existing suites updated for the new schema shape) |
 | Phase 16: Seeder reusability fix | `/goal` | Fixed a normalization flaw Phase 15's seeder introduced: it created one new `addresses` row per customer, so 500 seeded orders meant ~500 near-duplicate address rows for only 5 real neighborhoods. Made `addresses.customer_id` nullable (a shared logistics reference address has no single owner); reworked `app/services/orders.py::_get_or_create_address()` to key purely on `(neighborhood, city)` instead of `(customer_id, neighborhood)`, used by `POST /orders`/`POST /orders/sync` and this seeder alike; `app/services/customers.py`'s own customer-owned-address path is a deliberately separate, untouched concept. Rewrote `scripts/seed_cameroon_volume.py` into three independent pools (products+5 reference addresses, then 100 customers, then 500 orders randomly picking from the existing pools) plus `reset_database()` (drop-all + `init_db()`) called from `main()` for a pristine slate every run | 107 tests passing (`test_seed_cameroon_volume.py` rewritten around the three-pool structure; new `test_sync_reuses_shared_address_across_different_customers_in_same_neighborhood` regression test proving the fix) |
 | Phase 17: Temporal accountability (`updated_at`) | `/goal` | Added an `updated_at` column to `products`, `customers`, and `addresses` (millisecond-resolution default in sqlite — `STRFTIME('%Y-%m-%d %H:%M:%f','now')` — since bare `CURRENT_TIMESTAMP`'s 1-second resolution let an insert-then-update test land in the same second with an unchanged value); `schema_sqlite.sql` gets one `AFTER UPDATE` trigger per table that re-stamps `updated_at` on any modification (safe from recursion since `recursive_triggers` defaults off), `schema_postgres.sql` gets a single reusable `set_updated_at()` `plpgsql` function fired `BEFORE UPDATE` on all three tables. Exposed `updated_at` in `app/services/products.py`/`customers.py`'s `SELECT` column lists so it flows through existing API responses with no route changes. Re-verified the full CRUD grid (products/customers/orders) and the seeder against the new columns | 115 tests passing (new parametrized trigger tests in `test_database.py`, `updated_at`-refresh assertions added to the products/customers `PUT` tests) |
+| Phase 18: Payments CRUD | `/goal` | Added full CRUD over the `payments` ledger for direct transactional transparency, separate from `app/services/webhooks.py` (which only ever inserts a payment as a side effect of a provider callback): new `app/services/payments.py` + `app/routes/payments.py` (`GET`/`POST /payments` paginated newest-first, `GET /payments/{external_transaction_id}` with the order nested under `"order"`, `PUT`/`DELETE /payments/{payment_id}` — only `status`/`external_transaction_id` mutable, `UNIQUE(provider, external_transaction_id)` enforced on both create and update). Reused `OrderNotFoundError` from `app/services/webhooks.py` rather than duplicating it. Updated `openapi.json` (`Payment`/`PaymentWithOrder` schemas, all 5 new path/method combinations) and the README's live E2E Scenario 2 with a `GET /payments/{ref}` verification step right after a webhook resolves | 135 tests passing (new `test_payments_routes.py`; `test_docs_routes.py`'s path-set assertion extended) |
 
 Each `/goal` phase followed the same discipline: RED (failing test proving
 the gap) → GREEN (minimal code to close it) → REFACTOR (clean up without
