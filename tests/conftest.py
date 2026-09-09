@@ -37,14 +37,17 @@ def app(tmp_path):
     conn.commit()
     conn.close()
 
-    return create_app(
-        db_path=db_path,
-        webhook_secret=WEBHOOK_SECRET,
-        orange_webhook_secret=ORANGE_WEBHOOK_SECRET,
-        campay_webhook_secret=CAMPAY_WEBHOOK_SECRET,
-        smobilpay_webhook_secret=SMOBILPAY_WEBHOOK_SECRET,
-        default_aggregator=DEFAULT_AGGREGATOR,
-    )
+    flask_app = create_app()
+    # Inject isolated test config directly into app.config, overriding
+    # whatever Config.from_object() loaded from the real environment --
+    # the suite must never touch the production db file or real secrets.
+    flask_app.config["DATABASE_PATH"] = db_path
+    flask_app.config["MOMO_WEBHOOK_SECRET"] = WEBHOOK_SECRET
+    flask_app.config["ORANGE_WEBHOOK_SECRET"] = ORANGE_WEBHOOK_SECRET
+    flask_app.config["CAMPAY_WEBHOOK_SECRET"] = CAMPAY_WEBHOOK_SECRET
+    flask_app.config["SMOBILPAY_WEBHOOK_SECRET"] = SMOBILPAY_WEBHOOK_SECRET
+    flask_app.config["DEFAULT_AGGREGATOR"] = DEFAULT_AGGREGATOR
+    return flask_app
 
 
 @pytest.fixture

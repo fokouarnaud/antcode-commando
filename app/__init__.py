@@ -3,21 +3,9 @@ import flask
 from app.config.database import get_connection
 
 
-def create_app(
-    db_path,
-    webhook_secret,
-    orange_webhook_secret,
-    campay_webhook_secret,
-    smobilpay_webhook_secret,
-    default_aggregator,
-):
+def create_app():
     app = flask.Flask(__name__)
-    app.config["DATABASE_PATH"] = db_path
-    app.config["MOMO_WEBHOOK_SECRET"] = webhook_secret
-    app.config["ORANGE_WEBHOOK_SECRET"] = orange_webhook_secret
-    app.config["CAMPAY_WEBHOOK_SECRET"] = campay_webhook_secret
-    app.config["SMOBILPAY_WEBHOOK_SECRET"] = smobilpay_webhook_secret
-    app.config["DEFAULT_AGGREGATOR"] = default_aggregator
+    app.config.from_object("app.config.settings.Config")
 
     from app.routes.docs import docs_bp
     from app.routes.orders import orders_bp

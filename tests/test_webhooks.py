@@ -235,21 +235,21 @@ def post_aggregator(client, secret, payload, header, signature=None):
     )
 
 
-def _build_app(app, **overrides):
-    """Builds a second app instance from the test app's own secrets, so a
-    test can flip DEFAULT_AGGREGATOR without touching the shared `app`
-    fixture other tests in this module rely on.
+def _build_app(app, **config_overrides):
+    """Builds a second app instance seeded from the test app's own config
+    (app.config injection, same as conftest.py's fixture), so a test can
+    flip one setting -- e.g. default_aggregator="smobilpay" -- without
+    touching the shared `app` fixture other tests in this module rely on.
     """
-    kwargs = dict(
-        db_path=app.config["DATABASE_PATH"],
-        webhook_secret=app.config["MOMO_WEBHOOK_SECRET"],
-        orange_webhook_secret=app.config["ORANGE_WEBHOOK_SECRET"],
-        campay_webhook_secret=app.config["CAMPAY_WEBHOOK_SECRET"],
-        smobilpay_webhook_secret=app.config["SMOBILPAY_WEBHOOK_SECRET"],
-        default_aggregator=app.config["DEFAULT_AGGREGATOR"],
-    )
-    kwargs.update(overrides)
-    return create_app(**kwargs)
+    new_app = create_app()
+    for key in (
+        "DATABASE_PATH", "MOMO_WEBHOOK_SECRET", "ORANGE_WEBHOOK_SECRET",
+        "CAMPAY_WEBHOOK_SECRET", "SMOBILPAY_WEBHOOK_SECRET", "DEFAULT_AGGREGATOR",
+    ):
+        new_app.config[key] = app.config[key]
+    for key, value in config_overrides.items():
+        new_app.config[key.upper()] = value
+    return new_app
 
 
 def test_aggregator_webhook_verifies_with_the_default_aggregators_secret(client, app):

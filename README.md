@@ -74,10 +74,11 @@ without a join — see
 
 ```
 app/
-├── __init__.py                     # create_app() factory, registers all blueprints
+├── __init__.py                     # create_app() factory (zero-arg, loads Config), registers blueprints
 ├── config/
-│   └── database.py                 # get_connection(), init_db(), get_engine(), format_query()
-│                                    #   -- toggles sqlite3 / psycopg2 via DB_ENGINE env var
+│   ├── database.py                 # get_connection(), init_db(), get_engine(), format_query()
+│   │                                #   -- toggles sqlite3 / psycopg2 via DB_ENGINE env var
+│   └── settings.py                 # Config class -- app.config.from_object() source, mirrors env vars
 ├── database/
 │   ├── schema_sqlite.sql           # the 6-table schema + indexes (sqlite3)
 │   └── schema_postgres.sql         # same schema adapted for PostgreSQL (SERIAL/VARCHAR/TIMESTAMP)
@@ -103,6 +104,7 @@ tests/
 ├── test_generate_mock_transactions.py
 ├── test_orders_routes.py
 ├── test_pipeline.py
+├── test_settings.py
 └── test_webhooks.py
 run.py                               # dev entry point (python run.py)
 requirements.txt
@@ -168,7 +170,7 @@ reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
 python -m pytest -v
 ```
 
-48 tests, 100% passing (`python -m pytest -v`). Every behavior above —
+50 tests, 100% passing (`python -m pytest -v`). Every behavior above —
 including the schema, the ETL, the dual-engine connection layer, the
 multi-provider/aggregator webhooks, and the paginated order lookup — was
 written test-first: a failing test proving the gap, then the minimal code
@@ -319,6 +321,8 @@ TDD red/green/refactor loop.
 | — | `/goal` ×2 | Fix a real Mermaid syntax bug this ledger's own diagram introduced (`provider="momo"` — double quotes inside a `\|...\|` edge label break GitHub's renderer) actually on lines 57-58, not the line number first guessed; then reformat the project-layout tree with box-drawing characters | `0d9ebc3`, `fc89f34` |
 | Phase 12: Aggregator toggle layer | `/goal` | Generic `POST /webhook/aggregator` routing to whichever provider `DEFAULT_AGGREGATOR` names, reusing the existing `_webhook(provider)`/`_PROVIDER_CONFIG` machinery from Phase 9; add `campay`/`smobilpay` config entries; guard against an unconfigured `DEFAULT_AGGREGATOR` value (500, not an unhandled exception) | 3 new tests (default-aggregator secret verification, secret swap on aggregator change, unknown-aggregator 500) — 47 tests passing |
 | Phase 13: Data directory cleanup | `/goal` | Move the SQLite database file from the repo root to `data/ecommerce.db` (`run.py`, both `scripts/`); make `scripts/generate_mock_transactions.py`'s `ensure_import_table()`/`insert_orders()` engine-aware via `format_query()` and an engine-picked `CREATE_TABLE_SQL`/`CREATE_TABLE_SQL_POSTGRES` pair instead of hardcoded sqlite DDL | 1 new test (postgres DDL branch, mocked connection) — 48 tests passing. `.gitignore`'s existing `*.db` pattern already covered the new path — verified with `git check-ignore`, no `.gitignore` edit needed. `scripts/load_structured_orders.py::main()` still queries `sqlite_master` directly (sqlite-only) — out of this phase's scope, flagged as a follow-up gap rather than silently left undocumented |
+| — | `/goal` ×2 | Two directives describing defects in `scripts/generate_mock_transactions.py` and its own database-path handling that, on inspection, did not exist in the actual file (a "duplicated block before the docstring" and a "truncated `generate_messy_dataframe()`" that was already complete; a "missing postgres branch" that `get_connection()` already handled centrally) | No code changed either time — verified against the real file/module first, reported back with the specific line numbers and function bodies proving the premise was false, declined to fabricate a fix for a non-existent bug |
+| Phase 14: Centralized settings | `/goal` | New `app/config/settings.py::Config` (env-var-backed, uppercase class attributes for Flask's `from_object`); `create_app()` takes zero arguments and loads it via `app.config.from_object("app.config.settings.Config")`; `run.py` reduced to `create_app()`; `conftest.py`/`test_webhooks.py::_build_app()` inject isolated test config directly into `app.config` post-construction instead of passing constructor kwargs | 2 new tests (`tests/test_settings.py`: defaults, env-var overrides) — 50 tests passing. `get_connection()`/`get_engine()`/`format_query()` in `app/config/database.py` deliberately still read `os.environ` directly rather than `current_app.config` -- they're also called from `scripts/` with no Flask app context, where `current_app` would raise |
 
 Each `/goal` phase followed the same discipline: RED (failing test proving
 the gap) → GREEN (minimal code to close it) → REFACTOR (clean up without
