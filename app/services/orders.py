@@ -11,6 +11,37 @@ def get_order_by_id(conn, order_id):
     ).fetchone()
 
 
+def get_order_checkout_details(conn, order_id):
+    """Joins in the customer's name/phone and sums order_items for the
+    total, since orders carries no amount column of its own -- everything
+    initiate_geniuspay_payment() needs, in one place.
+    """
+    order = conn.execute(
+        format_query(
+            "SELECT o.order_id, c.full_name, c.phone_number FROM orders o "
+            "JOIN customers c ON c.customer_id = o.customer_id WHERE o.order_id = ?"
+        ),
+        (order_id,),
+    ).fetchone()
+    if order is None:
+        return None
+
+    total = conn.execute(
+        format_query(
+            "SELECT COALESCE(SUM(quantity * unit_price_fcfa), 0) AS total "
+            "FROM order_items WHERE order_id = ?"
+        ),
+        (order_id,),
+    ).fetchone()["total"]
+
+    return {
+        "order_id": order["order_id"],
+        "customer_name": order["full_name"],
+        "customer_phone": order["phone_number"],
+        "amount_fcfa": total,
+    }
+
+
 def list_orders(conn, neighborhood=None, status=None, page=1, per_page=20):
     """Filters orders by customer_neighborhood and/or delivery_status -- the
     exact leading-column and composite lookups idx_orders_neighborhood_status

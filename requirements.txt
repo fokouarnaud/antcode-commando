@@ -1,5 +1,6 @@
 flask
 pytest
+requests
 pandas
 numpy
 psycopg2-binary  # only imported when DB_ENGINE=postgresql (app/config/database.py)

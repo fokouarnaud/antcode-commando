@@ -1,3 +1,8 @@
+from unittest.mock import patch
+
+from app.services.geniuspay import GeniusPayError
+
+
 def test_get_order_by_id_returns_order_details(client):
     response = client.get("/orders/1")
 
@@ -54,3 +59,34 @@ def test_list_orders_paginates_to_second_page(client):
         "total_records": 2,
         "total_pages": 2,
     }
+
+
+@patch("app.routes.orders.initiate_geniuspay_payment")
+def test_checkout_returns_checkout_url_on_success(mock_initiate, client):
+    mock_initiate.return_value = "https://geniuspay.ci/pay/abc123"
+
+    response = client.post("/orders/1/checkout")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"checkout_url": "https://geniuspay.ci/pay/abc123"}
+    mock_initiate.assert_called_once_with(
+        1, 0, customer_phone="+237690000001", customer_name="Amina Njoya"
+    )
+
+
+@patch("app.routes.orders.initiate_geniuspay_payment")
+def test_checkout_returns_404_for_missing_order(mock_initiate, client):
+    response = client.post("/orders/999/checkout")
+
+    assert response.status_code == 404
+    mock_initiate.assert_not_called()
+
+
+@patch("app.routes.orders.initiate_geniuspay_payment")
+def test_checkout_returns_502_when_geniuspay_fails(mock_initiate, client):
+    mock_initiate.side_effect = GeniusPayError("GeniusPay payment initiation failed")
+
+    response = client.post("/orders/1/checkout")
+
+    assert response.status_code == 502
+    assert response.get_json() == {"error": "payment initiation failed"}
