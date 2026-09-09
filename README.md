@@ -54,8 +54,8 @@ flowchart LR
     PIPE --> CUST & ADDR & PROD & ORD & ITEMS
     MTN -->|HMAC-SHA256 over raw body| HOOK_MOMO
     ORANGE -->|HMAC-SHA256 over raw body| HOOK_ORANGE
-    HOOK_MOMO -->|provider="momo"\nidempotent insert| PAY
-    HOOK_ORANGE -->|provider="orange"\nidempotent insert| PAY
+    HOOK_MOMO -->|provider=momo\nidempotent insert| PAY
+    HOOK_ORANGE -->|provider=orange\nidempotent insert| PAY
     HOOK_MOMO -->|update payment_status| ORD
     HOOK_ORANGE -->|update payment_status| ORD
     ORD --> ORD_R
