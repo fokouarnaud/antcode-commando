@@ -352,4 +352,10 @@ Also still open from earlier phases: `schema_postgres.sql` and the
 PostgreSQL branch of `get_connection()`/`init_db()`/`get_last_row_id()` have
 never run against a live PostgreSQL server (none is available in this
 project's environment) — validated by code review and mocked unit tests
-only, not an end-to-end run.
+only, not an end-to-end run. And `scripts/load_structured_orders.py::main()`
+still checks for existing tables via `SELECT name FROM sqlite_master WHERE
+type='table'` — a sqlite-only system table — so this one script would need
+a `get_engine()` branch (e.g. `information_schema.tables` on PostgreSQL)
+before it could seed a Postgres instance; unlike the rest of this project's
+data layer, this file wasn't touched by the database-agnosticism phases
+(see Phase 13 in the ledger below).
