@@ -36,12 +36,11 @@ def test_initiate_geniuspay_payment_returns_checkout_url_on_success(mock_post, a
     assert kwargs["json"]["amount"] == 15000
     assert kwargs["json"]["description"] == "Commande #42"
     assert kwargs["json"]["metadata"] == {"order_id": 42}
-    assert kwargs["json"]["customer_phone"] == "+237690000001"
-    assert kwargs["json"]["customer_name"] == "Amina Njoya"
+    assert kwargs["json"]["customer"] == {"name": "Amina Njoya", "phone": "+237690000001"}
 
 
 @patch("requests.post")
-def test_initiate_geniuspay_payment_omits_customer_fields_when_not_given(mock_post, app_context):
+def test_initiate_geniuspay_payment_omits_customer_field_when_not_given(mock_post, app_context):
     mock_post.return_value = Mock(
         status_code=201,
         json=Mock(return_value={"checkout_url": "https://geniuspay.ci/pay/xyz"}),
@@ -50,8 +49,20 @@ def test_initiate_geniuspay_payment_omits_customer_fields_when_not_given(mock_po
     initiate_geniuspay_payment(7, 5000)
 
     _, kwargs = mock_post.call_args
-    assert "customer_phone" not in kwargs["json"]
-    assert "customer_name" not in kwargs["json"]
+    assert "customer" not in kwargs["json"]
+
+
+@patch("requests.post")
+def test_initiate_geniuspay_payment_customer_object_only_includes_given_fields(mock_post, app_context):
+    mock_post.return_value = Mock(
+        status_code=201,
+        json=Mock(return_value={"checkout_url": "https://geniuspay.ci/pay/xyz"}),
+    )
+
+    initiate_geniuspay_payment(7, 5000, customer_phone="+237690000002")
+
+    _, kwargs = mock_post.call_args
+    assert kwargs["json"]["customer"] == {"phone": "+237690000002"}
 
 
 @patch("requests.post")

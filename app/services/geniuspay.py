@@ -30,10 +30,13 @@ def initiate_geniuspay_payment(order_id, amount_fcfa, customer_phone=None, custo
         "description": f"Commande #{order_id}",
         "metadata": {"order_id": order_id},
     }
-    if customer_phone:
-        payload["customer_phone"] = customer_phone
+    customer = {}
     if customer_name:
-        payload["customer_name"] = customer_name
+        customer["name"] = customer_name
+    if customer_phone:
+        customer["phone"] = customer_phone
+    if customer:
+        payload["customer"] = customer
 
     try:
         response = requests.post(GENIUSPAY_ENDPOINT, json=payload, headers=headers, timeout=10)
