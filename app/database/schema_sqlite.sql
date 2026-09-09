@@ -1,8 +1,14 @@
+-- updated_at defaults use STRFTIME(...,'now') rather than bare
+-- CURRENT_TIMESTAMP: CURRENT_TIMESTAMP's 1-second resolution means an
+-- insert immediately followed by an update (as in a test) can land in the
+-- same wall-clock second and produce an identical string, hiding a real
+-- change. The millisecond fraction ("%f") avoids that.
 CREATE TABLE customers (
     customer_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     full_name     TEXT NOT NULL,
     phone_number  TEXT NOT NULL UNIQUE,
-    created_at    TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+    created_at    TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    updated_at    TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'now'))
 );
 
 -- customer_id is nullable: a customer-registered address is owned by that
@@ -14,7 +20,8 @@ CREATE TABLE addresses (
     neighborhood    TEXT NOT NULL,
     city            TEXT NOT NULL,
     street_details  TEXT,
-    created_at      TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+    created_at      TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    updated_at      TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'now'))
 );
 
 CREATE INDEX idx_addresses_neighborhood_city ON addresses (neighborhood, city);
@@ -25,8 +32,37 @@ CREATE TABLE products (
     category         TEXT NOT NULL,
     unit_price_fcfa  INTEGER NOT NULL,
     stock_quantity   INTEGER NOT NULL DEFAULT 0,
-    created_at       TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+    created_at       TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    updated_at       TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'now'))
 );
+
+-- AFTER UPDATE triggers refresh updated_at on any modification. The
+-- trigger's own UPDATE does not re-fire itself: SQLite's recursive_triggers
+-- setting defaults OFF (not enabled by app/config/database.py), so this
+-- can't recurse.
+CREATE TRIGGER trg_customers_updated_at
+AFTER UPDATE ON customers
+FOR EACH ROW
+BEGIN
+    UPDATE customers SET updated_at = STRFTIME('%Y-%m-%d %H:%M:%f', 'now')
+    WHERE customer_id = OLD.customer_id;
+END;
+
+CREATE TRIGGER trg_addresses_updated_at
+AFTER UPDATE ON addresses
+FOR EACH ROW
+BEGIN
+    UPDATE addresses SET updated_at = STRFTIME('%Y-%m-%d %H:%M:%f', 'now')
+    WHERE address_id = OLD.address_id;
+END;
+
+CREATE TRIGGER trg_products_updated_at
+AFTER UPDATE ON products
+FOR EACH ROW
+BEGIN
+    UPDATE products SET updated_at = STRFTIME('%Y-%m-%d %H:%M:%f', 'now')
+    WHERE product_id = OLD.product_id;
+END;
 
 CREATE TABLE orders (
     order_id         TEXT PRIMARY KEY,

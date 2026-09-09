@@ -1,5 +1,6 @@
 import sys
 import sqlite3
+import time
 import types
 
 import pytest
@@ -50,6 +51,68 @@ def test_init_db_enforces_foreign_keys():
             "VALUES (?, ?, ?, ?)",
             (999, "Bonapriso", "Douala", "Rue 1234"),
         )
+
+
+@pytest.mark.parametrize("table", ["products", "customers", "addresses"])
+def test_reference_tables_have_updated_at_column(table):
+    conn = get_connection(":memory:")
+
+    init_db(conn)
+
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    assert "updated_at" in columns
+
+
+@pytest.mark.parametrize(
+    "table,pk,insert_sql,insert_params,update_sql",
+    [
+        (
+            "products",
+            "product_id",
+            "INSERT INTO products (name, category, unit_price_fcfa) VALUES (?, ?, ?)",
+            ("Widget", "Electronics", 1000),
+            "UPDATE products SET stock_quantity = 5 WHERE product_id = ?",
+        ),
+        (
+            "customers",
+            "customer_id",
+            "INSERT INTO customers (full_name, phone_number) VALUES (?, ?)",
+            ("Amina Njoya", "+237690000001"),
+            "UPDATE customers SET full_name = 'Amina N.' WHERE customer_id = ?",
+        ),
+        (
+            "addresses",
+            "address_id",
+            "INSERT INTO addresses (neighborhood, city) VALUES (?, ?)",
+            ("Akwa", "Douala"),
+            "UPDATE addresses SET street_details = 'Rue 1234' WHERE address_id = ?",
+        ),
+    ],
+)
+def test_after_update_trigger_refreshes_updated_at(table, pk, insert_sql, insert_params, update_sql):
+    """The AFTER UPDATE trigger on each of these tables must bump
+    updated_at on any modification, independent of whichever service
+    layer issued the UPDATE -- proven here with raw SQL, no app code.
+    """
+    conn = get_connection(":memory:")
+    init_db(conn)
+
+    cursor = conn.execute(insert_sql, insert_params)
+    row_id = cursor.lastrowid
+    original_updated_at = conn.execute(
+        f"SELECT updated_at FROM {table} WHERE {pk} = ?", (row_id,)
+    ).fetchone()["updated_at"]
+
+    # updated_at has millisecond resolution -- without this, an insert
+    # immediately followed by an update can land in the same millisecond
+    # and produce an identical string, hiding a real change.
+    time.sleep(0.01)
+    conn.execute(update_sql, (row_id,))
+
+    new_updated_at = conn.execute(
+        f"SELECT updated_at FROM {table} WHERE {pk} = ?", (row_id,)
+    ).fetchone()["updated_at"]
+    assert new_updated_at > original_updated_at
 
 
 def test_init_db_creates_composite_neighborhood_index():

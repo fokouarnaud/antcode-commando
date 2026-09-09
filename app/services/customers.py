@@ -34,7 +34,7 @@ def _phone_in_use(conn, phone_number, exclude_customer_id=None):
 def get_customer(conn, customer_id):
     customer = conn.execute(
         format_query(
-            "SELECT customer_id, full_name, phone_number, created_at FROM customers "
+            "SELECT customer_id, full_name, phone_number, created_at, updated_at FROM customers "
             "WHERE customer_id = ?"
         ),
         (customer_id,),
@@ -44,8 +44,8 @@ def get_customer(conn, customer_id):
 
     addresses = conn.execute(
         format_query(
-            "SELECT address_id, neighborhood, city, street_details FROM addresses "
-            "WHERE customer_id = ? ORDER BY address_id"
+            "SELECT address_id, neighborhood, city, street_details, created_at, updated_at "
+            "FROM addresses WHERE customer_id = ? ORDER BY address_id"
         ),
         (customer_id,),
     ).fetchall()

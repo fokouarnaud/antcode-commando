@@ -1,6 +1,8 @@
 from app.config.database import format_query, get_last_row_id
 
-_PRODUCT_COLUMNS = "product_id, name, category, unit_price_fcfa, stock_quantity, created_at"
+_PRODUCT_COLUMNS = (
+    "product_id, name, category, unit_price_fcfa, stock_quantity, created_at, updated_at"
+)
 
 
 class ProductValidationError(Exception):

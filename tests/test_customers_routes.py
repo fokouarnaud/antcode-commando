@@ -1,3 +1,5 @@
+import time
+
 from app.config.database import get_connection
 
 
@@ -68,6 +70,33 @@ def test_update_customer_changes_name_and_address(client):
     body = response.get_json()
     assert body["full_name"] == "Amina Njoya Kamdem"
     assert body["addresses"][0]["neighborhood"] == "Bastos"
+
+
+def test_update_customer_refreshes_customer_and_address_updated_at(client):
+    created = client.post("/customers", json={
+        "full_name": "Larissa Mvondo",
+        "phone_number": "+237677222222",
+        "neighborhood": "Akwa",
+        "city": "Douala",
+    }).get_json()
+    original_customer_updated_at = created["updated_at"]
+    original_address_updated_at = created["addresses"][0]["updated_at"]
+
+    # updated_at has millisecond resolution -- without this, the create
+    # immediately followed by the update below can land in the same
+    # millisecond and produce an identical string, hiding a real change.
+    time.sleep(0.01)
+    response = client.put(f"/customers/{created['customer_id']}", json={
+        "full_name": "Larissa Mvondo Epse Talla",
+        "street_details": "Rue 1234",
+    })
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["full_name"] == "Larissa Mvondo Epse Talla"
+    assert body["updated_at"] > original_customer_updated_at
+    assert body["addresses"][0]["street_details"] == "Rue 1234"
+    assert body["addresses"][0]["updated_at"] > original_address_updated_at
 
 
 def test_update_customer_returns_409_for_phone_taken_by_another_customer(client):

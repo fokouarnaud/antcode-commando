@@ -45,7 +45,13 @@
           "name": { "type": "string", "example": "Smartphone Tecno Spark" },
           "category": { "type": "string", "example": "Electronics" },
           "unit_price_fcfa": { "type": "integer", "example": 95000 },
-          "stock_quantity": { "type": "integer", "example": 50 }
+          "stock_quantity": { "type": "integer", "example": 50 },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Auto-refreshed by an AFTER UPDATE trigger (sqlite) / BEFORE UPDATE trigger via set_updated_at() (postgres) on any modification."
+          }
         }
       },
       "Address": {
@@ -54,7 +60,9 @@
           "address_id": { "type": "integer" },
           "neighborhood": { "type": "string", "example": "Akwa" },
           "city": { "type": "string", "example": "Douala" },
-          "street_details": { "type": "string", "nullable": true }
+          "street_details": { "type": "string", "nullable": true },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
         }
       },
       "Customer": {
@@ -63,6 +71,8 @@
           "customer_id": { "type": "integer" },
           "full_name": { "type": "string", "example": "Amina Njoya" },
           "phone_number": { "type": "string", "example": "+237690000001" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" },
           "addresses": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/Address" }

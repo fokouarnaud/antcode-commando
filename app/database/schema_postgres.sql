@@ -2,7 +2,8 @@ CREATE TABLE customers (
     customer_id   SERIAL PRIMARY KEY,
     full_name     VARCHAR(255) NOT NULL,
     phone_number  VARCHAR(32) NOT NULL UNIQUE,
-    created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- customer_id is nullable: a customer-registered address is owned by that
@@ -14,7 +15,8 @@ CREATE TABLE addresses (
     neighborhood    VARCHAR(255) NOT NULL,
     city            VARCHAR(255) NOT NULL,
     street_details  VARCHAR(255),
-    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_addresses_neighborhood_city ON addresses (neighborhood, city);
@@ -25,8 +27,33 @@ CREATE TABLE products (
     category         VARCHAR(255) NOT NULL,
     unit_price_fcfa  INTEGER NOT NULL,
     stock_quantity   INTEGER NOT NULL DEFAULT 0,
-    created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Standard Postgres update-trigger pattern: one reusable trigger function,
+-- fired BEFORE UPDATE (so it can mutate NEW in place, unlike an AFTER
+-- trigger which would need a second UPDATE statement) on each table that
+-- needs an auto-refreshed updated_at.
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_customers_updated_at
+BEFORE UPDATE ON customers
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_addresses_updated_at
+BEFORE UPDATE ON addresses
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_products_updated_at
+BEFORE UPDATE ON products
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TABLE orders (
     order_id         VARCHAR(255) PRIMARY KEY,

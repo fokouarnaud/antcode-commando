@@ -1,3 +1,5 @@
+import time
+
 from app.config.database import get_connection
 
 
@@ -59,6 +61,24 @@ def test_update_product_changes_fields(client):
     body = response.get_json()
     assert body["name"] == "New Name"
     assert body["unit_price_fcfa"] == 6000
+
+
+def test_update_product_refreshes_updated_at(client):
+    created = client.post("/products", json={
+        "name": "Old Name", "category": "Fashion", "unit_price_fcfa": 5000,
+    }).get_json()
+    original_updated_at = created["updated_at"]
+
+    # updated_at has millisecond resolution -- without this, an insert
+    # immediately followed by an update can land in the same millisecond
+    # and produce an identical string, hiding a real change.
+    time.sleep(0.01)
+    response = client.put(f"/products/{created['product_id']}", json={"stock_quantity": 3})
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["stock_quantity"] == 3
+    assert body["updated_at"] > original_updated_at
 
 
 def test_update_product_returns_404_for_unknown_id(client):
