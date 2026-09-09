@@ -4,7 +4,12 @@ from flask import Blueprint, jsonify, request
 
 from app import get_db
 from app.services.geniuspay import GeniusPayError, initiate_geniuspay_payment
-from app.services.orders import get_order_by_id, get_order_checkout_details, list_orders
+from app.services.orders import (
+    get_order_by_id,
+    get_order_checkout_details,
+    list_orders,
+    sync_offline_orders,
+)
 
 orders_bp = Blueprint("orders", __name__)
 
@@ -39,6 +44,20 @@ def order_list():
             "total_pages": math.ceil(total_records / per_page),
         },
     }), 200
+
+
+@orders_bp.route("/orders/sync", methods=["POST"])
+def orders_sync():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, list):
+        return jsonify({"error": "expected a JSON array of orders"}), 400
+
+    try:
+        result = sync_offline_orders(get_db(), payload)
+    except KeyError as exc:
+        return jsonify({"error": f"missing required field: {exc}"}), 400
+
+    return jsonify(result), 200
 
 
 @orders_bp.route("/orders/<int:order_id>/checkout", methods=["POST"])

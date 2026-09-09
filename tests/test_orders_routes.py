@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+from app.config.database import get_connection
 from app.services.geniuspay import GeniusPayError
 
 
@@ -90,3 +91,111 @@ def test_checkout_returns_502_when_geniuspay_fails(mock_initiate, client):
 
     assert response.status_code == 502
     assert response.get_json() == {"error": "payment initiation failed"}
+
+
+def sync_batch(**overrides):
+    order = {
+        "external_ref": "OFFLINE-0001",
+        "customer_name": "Jean Foka",
+        "customer_phone": "+237699999901",
+        "neighborhood": "Bonapriso",
+    }
+    order.update(overrides)
+    return [order]
+
+
+def test_sync_inserts_new_orders_and_reports_counts(client, app):
+    payload = [
+        sync_batch()[0],
+        {
+            "external_ref": "OFFLINE-0002",
+            "customer_name": "Marie Ekwalla",
+            "customer_phone": "+237699999902",
+            "neighborhood": "Deido",
+        },
+    ]
+
+    response = client.post("/orders/sync", json=payload)
+
+    assert response.status_code == 200
+    assert response.get_json() == {"synced": 2, "skipped": 0}
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    count = conn.execute(
+        "SELECT COUNT(*) AS n FROM orders WHERE external_ref IN ('OFFLINE-0001', 'OFFLINE-0002')"
+    ).fetchone()["n"]
+    assert count == 2
+    order = conn.execute(
+        "SELECT delivery_status, payment_status FROM orders WHERE external_ref = 'OFFLINE-0001'"
+    ).fetchone()
+    assert order["delivery_status"] == "Pending"
+    assert order["payment_status"] == "Pending"
+
+
+def test_sync_is_idempotent_on_replayed_batch(client, app):
+    """Simulates a field agent's app retrying the same sync after an
+    internet blackout swallowed the first response -- the second POST of
+    the identical batch must skip every already-synced order rather than
+    inserting duplicates or splitting them into a second bucket.
+    """
+    payload = sync_batch(external_ref="OFFLINE-0003", customer_phone="+237699999903")
+
+    first = client.post("/orders/sync", json=payload)
+    second = client.post("/orders/sync", json=payload)
+
+    assert first.status_code == 200
+    assert first.get_json() == {"synced": 1, "skipped": 0}
+    assert second.status_code == 200
+    assert second.get_json() == {"synced": 0, "skipped": 1}
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    count = conn.execute(
+        "SELECT COUNT(*) AS n FROM orders WHERE external_ref = 'OFFLINE-0003'"
+    ).fetchone()["n"]
+    assert count == 1
+    customer_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM customers WHERE phone_number = '+237699999903'"
+    ).fetchone()["n"]
+    assert customer_count == 1
+
+
+def test_sync_reuses_existing_customer_and_address_across_orders(client, app):
+    """Two orders from the same returning customer/neighborhood must not
+    create a second customer or address row -- get_or_create semantics.
+    """
+    payload = [
+        {
+            "external_ref": "OFFLINE-0004",
+            "customer_name": "Paul Biya Jr",
+            "customer_phone": "+237699999904",
+            "neighborhood": "Akwa",
+        },
+        {
+            "external_ref": "OFFLINE-0005",
+            "customer_name": "Paul Biya Jr",
+            "customer_phone": "+237699999904",
+            "neighborhood": "Akwa",
+        },
+    ]
+
+    response = client.post("/orders/sync", json=payload)
+
+    assert response.get_json() == {"synced": 2, "skipped": 0}
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    customer_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM customers WHERE phone_number = '+237699999904'"
+    ).fetchone()["n"]
+    assert customer_count == 1
+
+
+def test_sync_returns_400_for_non_array_payload(client):
+    response = client.post("/orders/sync", json={"not": "a list"})
+
+    assert response.status_code == 400
+
+
+def test_sync_returns_400_for_order_missing_required_field(client):
+    response = client.post("/orders/sync", json=[{"external_ref": "OFFLINE-0006"}])
+
+    assert response.status_code == 400
