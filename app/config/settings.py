@@ -14,6 +14,10 @@ at all (current_app would raise outside one).
 
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 class Config:
     DB_ENGINE = os.environ.get("DB_ENGINE", "sqlite")

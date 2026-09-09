@@ -1,9 +1,12 @@
 import os
 
 import pytest
+from dotenv import load_dotenv
 
-from app import create_app
-from app.config.database import get_connection, init_db
+load_dotenv()
+
+from app import create_app  # noqa: E402
+from app.config.database import get_connection, init_db  # noqa: E402
 
 WEBHOOK_SECRET = "test-momo-secret"
 ORANGE_WEBHOOK_SECRET = "test-orange-secret"

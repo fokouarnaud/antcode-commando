@@ -27,6 +27,10 @@ REPO_ROOT = pathlib.Path(__file__).parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv()
+
 from app.config.database import format_query, get_connection, get_engine  # noqa: E402
 
 CSV_PATH = REPO_ROOT / "data" / "ecommerce_orders_messy_data.csv"

@@ -8,7 +8,11 @@ Example: run with Campay as the active aggregator on /webhook/aggregator:
     DEFAULT_AGGREGATOR=campay CAMPAY_WEBHOOK_SECRET=secret python run.py
 """
 
-from app import create_app
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from app import create_app  # noqa: E402
 
 app = create_app()
 
