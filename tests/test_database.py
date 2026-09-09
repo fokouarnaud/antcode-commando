@@ -73,7 +73,7 @@ def test_orders_table_has_neighborhood_and_delivery_status_columns():
     init_db(conn)
 
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(orders)").fetchall()}
-    assert {"customer_neighborhood", "delivery_status", "external_ref"} <= columns
+    assert {"order_id", "customer_neighborhood", "delivery_status"} <= columns
 
 
 def test_init_db_creates_orders_neighborhood_status_index():

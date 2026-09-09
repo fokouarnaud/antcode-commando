@@ -8,7 +8,7 @@ from app.config.database import get_connection
 def momo_payload(**overrides):
     payload = {
         "provider": "MTN MoMo",
-        "order_id": 1,
+        "order_id": "ECM-00001",
         "external_transaction_id": "MOMO-TX-0001",
         "amount_fcfa": 15000,
         "status": "SUCCESSFUL",
@@ -35,7 +35,7 @@ def post_momo(client, secret, payload, signature=None):
 
 def orange_payload(**overrides):
     payload = {
-        "order_id": 2,
+        "order_id": "ECM-00002",
         "external_transaction_id": "ORANGE-TX-0001",
         "amount_fcfa": 8000,
         "status": "SUCCESSFUL",
@@ -106,7 +106,9 @@ def test_momo_webhook_processes_valid_callback_and_marks_order_paid(client, app)
     payment = conn.execute("SELECT * FROM payments").fetchone()
     assert payment["external_transaction_id"] == "MOMO-TX-0001"
     assert payment["status"] == "Successful"
-    order = conn.execute("SELECT payment_status FROM orders WHERE order_id = 1").fetchone()
+    order = conn.execute(
+        "SELECT payment_status FROM orders WHERE order_id = ?", ("ECM-00001",)
+    ).fetchone()
     assert order["payment_status"] == "Paid"
 
 
@@ -132,7 +134,7 @@ def test_momo_webhook_returns_404_for_unknown_order(client, app):
     response = post_momo(
         client,
         app.config["MOMO_WEBHOOK_SECRET"],
-        momo_payload(order_id=999, external_transaction_id="MOMO-TX-UNKNOWN"),
+        momo_payload(order_id="ECM-99999", external_transaction_id="MOMO-TX-UNKNOWN"),
     )
 
     assert response.status_code == 404
@@ -166,7 +168,9 @@ def test_orange_webhook_processes_valid_callback_and_marks_order_paid(client, ap
     ).fetchone()
     assert payment["provider"] == "orange"
     assert payment["status"] == "Successful"
-    order = conn.execute("SELECT payment_status FROM orders WHERE order_id = 2").fetchone()
+    order = conn.execute(
+        "SELECT payment_status FROM orders WHERE order_id = ?", ("ECM-00002",)
+    ).fetchone()
     assert order["payment_status"] == "Paid"
 
 
@@ -192,12 +196,12 @@ def test_momo_and_orange_callbacks_reusing_the_same_transaction_id_are_independe
     momo_response = post_momo(
         client,
         app.config["MOMO_WEBHOOK_SECRET"],
-        momo_payload(order_id=1, external_transaction_id=shared_id),
+        momo_payload(order_id="ECM-00001", external_transaction_id=shared_id),
     )
     orange_response = post_orange(
         client,
         app.config["ORANGE_WEBHOOK_SECRET"],
-        orange_payload(order_id=2, external_transaction_id=shared_id),
+        orange_payload(order_id="ECM-00002", external_transaction_id=shared_id),
     )
 
     assert momo_response.get_json()["status"] == "processed"
@@ -213,7 +217,7 @@ def test_momo_and_orange_callbacks_reusing_the_same_transaction_id_are_independe
 
 def campay_payload(**overrides):
     payload = {
-        "order_id": 1,
+        "order_id": "ECM-00001",
         "external_transaction_id": "CAMPAY-TX-0001",
         "amount_fcfa": 5000,
         "status": "SUCCESSFUL",
@@ -262,7 +266,7 @@ def test_webhook_route_processes_smobilpay_callback_via_its_own_provider_secret(
         client,
         "smobilpay",
         app.config["SMOBILPAY_WEBHOOK_SECRET"],
-        campay_payload(order_id=2, external_transaction_id="SMOBIL-TX-0001"),
+        campay_payload(order_id="ECM-00002", external_transaction_id="SMOBIL-TX-0001"),
         "X-Smobilpay-Signature",
     )
 
@@ -283,7 +287,7 @@ def test_webhook_route_returns_500_for_unknown_provider(client):
     assert response.status_code == 500
 
 
-def geniuspay_payload(order_id=1, transaction_id="GENIUSPAY-TX-0001", amount=12000):
+def geniuspay_payload(order_id="ECM-00001", transaction_id="GENIUSPAY-TX-0001", amount=12000):
     return {
         "data": {
             "transaction_id": transaction_id,
@@ -380,7 +384,9 @@ def test_geniuspay_webhook_processes_payment_success_event_and_marks_order_paid(
     assert payment["provider"] == "geniuspay"
     assert payment["amount_fcfa"] == 12000
     assert payment["status"] == "Successful"
-    order = conn.execute("SELECT payment_status FROM orders WHERE order_id = 1").fetchone()
+    order = conn.execute(
+        "SELECT payment_status FROM orders WHERE order_id = ?", ("ECM-00001",)
+    ).fetchone()
     assert order["payment_status"] == "Paid"
 
 
@@ -395,7 +401,9 @@ def test_geniuspay_webhook_does_not_mark_order_paid_for_non_success_event(client
     assert response.status_code == 200
 
     conn = get_connection(app.config["DATABASE_PATH"])
-    order = conn.execute("SELECT payment_status FROM orders WHERE order_id = 1").fetchone()
+    order = conn.execute(
+        "SELECT payment_status FROM orders WHERE order_id = ?", ("ECM-00001",)
+    ).fetchone()
     assert order["payment_status"] == "Failed"
 
 
@@ -440,7 +448,7 @@ def test_geniuspay_webhook_returns_404_for_unknown_order(client, app):
     response = post_geniuspay(
         client,
         app.config["GENIUSPAY_WEBHOOK_SECRET"],
-        geniuspay_payload(order_id=999, transaction_id="GENIUSPAY-TX-UNKNOWN"),
+        geniuspay_payload(order_id="ECM-99999", transaction_id="GENIUSPAY-TX-UNKNOWN"),
     )
 
     assert response.status_code == 404
@@ -454,7 +462,7 @@ def test_simulate_carrier_webhook_404s_when_debug_disabled(client):
         "/webhook/simulate-carrier",
         json={
             "provider": "momo",
-            "order_id": 1,
+            "order_id": "ECM-00001",
             "external_transaction_id": "SIM-TX-00",
             "amount": 5000,
         },
@@ -471,7 +479,7 @@ def test_simulate_carrier_webhook_processes_momo_callback_when_debug_enabled(app
         "/webhook/simulate-carrier",
         json={
             "provider": "momo",
-            "order_id": 1,
+            "order_id": "ECM-00001",
             "external_transaction_id": "SIM-TX-01",
             "amount": 5000,
             "phone": "+237690000009",
@@ -487,7 +495,9 @@ def test_simulate_carrier_webhook_processes_momo_callback_when_debug_enabled(app
     ).fetchone()
     assert payment["provider"] == "momo"
     assert payment["status"] == "Successful"
-    order = conn.execute("SELECT payment_status FROM orders WHERE order_id = 1").fetchone()
+    order = conn.execute(
+        "SELECT payment_status FROM orders WHERE order_id = ?", ("ECM-00001",)
+    ).fetchone()
     assert order["payment_status"] == "Paid"
 
 
@@ -499,7 +509,7 @@ def test_simulate_carrier_webhook_processes_orange_callback_when_debug_enabled(a
         "/webhook/simulate-carrier",
         json={
             "provider": "orange",
-            "order_id": 2,
+            "order_id": "ECM-00002",
             "external_transaction_id": "SIM-TX-02",
             "amount": 8000,
         },
@@ -522,7 +532,7 @@ def test_simulate_carrier_webhook_rejects_unsupported_provider_when_debug_enable
         "/webhook/simulate-carrier",
         json={
             "provider": "geniuspay",
-            "order_id": 1,
+            "order_id": "ECM-00001",
             "external_transaction_id": "SIM-TX-BAD",
             "amount": 1000,
         },
@@ -539,7 +549,7 @@ def test_simulate_carrier_webhook_returns_404_for_unknown_order_when_debug_enabl
         "/webhook/simulate-carrier",
         json={
             "provider": "momo",
-            "order_id": 999,
+            "order_id": "ECM-99999",
             "external_transaction_id": "SIM-TX-03",
             "amount": 1000,
         },
@@ -557,7 +567,7 @@ def test_simulate_carrier_webhook_is_idempotent_on_replay_when_debug_enabled(app
     client = app.test_client()
     body = {
         "provider": "momo",
-        "order_id": 1,
+        "order_id": "ECM-00001",
         "external_transaction_id": "SIM-TX-04",
         "amount": 3000,
     }

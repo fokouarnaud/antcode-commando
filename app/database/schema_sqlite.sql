@@ -26,13 +26,12 @@ CREATE TABLE products (
 );
 
 CREATE TABLE orders (
-    order_id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id                TEXT PRIMARY KEY,
     customer_id             INTEGER NOT NULL REFERENCES customers (customer_id),
     address_id              INTEGER NOT NULL REFERENCES addresses (address_id),
     customer_neighborhood   TEXT NOT NULL,
     delivery_status         TEXT NOT NULL DEFAULT 'Pending',
     payment_status          TEXT NOT NULL DEFAULT 'Pending',
-    external_ref            TEXT UNIQUE,
     created_at              TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
     updated_at              TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
 );
@@ -41,7 +40,7 @@ CREATE INDEX idx_orders_neighborhood_status ON orders (customer_neighborhood, de
 
 CREATE TABLE order_items (
     order_item_id    INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id         INTEGER NOT NULL REFERENCES orders (order_id),
+    order_id         TEXT NOT NULL REFERENCES orders (order_id),
     product_id       INTEGER NOT NULL REFERENCES products (product_id),
     quantity         INTEGER NOT NULL,
     unit_price_fcfa  INTEGER NOT NULL
@@ -49,7 +48,7 @@ CREATE TABLE order_items (
 
 CREATE TABLE payments (
     payment_id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id                 INTEGER NOT NULL REFERENCES orders (order_id),
+    order_id                 TEXT NOT NULL REFERENCES orders (order_id),
     provider                 TEXT NOT NULL,
     external_transaction_id  TEXT NOT NULL,
     amount_fcfa              INTEGER NOT NULL,

@@ -62,16 +62,16 @@ def _is_valid_row(row):
     return True
 
 
-def _get_or_create_customer(conn, external_ref):
+def _get_or_create_customer(conn, order_id):
     row = conn.execute(
         format_query("SELECT customer_id FROM customers WHERE full_name = ?"),
-        (f"Customer {external_ref}",),
+        (f"Customer {order_id}",),
     ).fetchone()
     if row:
         return row["customer_id"], False
     cursor = conn.execute(
         format_query("INSERT INTO customers (full_name, phone_number) VALUES (?, ?)"),
-        (f"Customer {external_ref}", f"+237-SYN-{external_ref}"),
+        (f"Customer {order_id}", f"+237-SYN-{order_id}"),
     )
     return get_last_row_id(cursor, "customers", "customer_id"), True
 
@@ -116,20 +116,20 @@ def load_structured_data(conn):
     }
 
     rows = conn.execute(format_query("SELECT * FROM ecommerce_orders_raw")).fetchall()
-    seen_external_refs = set()
+    seen_order_ids = set()
 
     for row in rows:
         row = dict(row)
-        external_ref = row.get("order_id")
+        order_id = row.get("order_id")
 
-        if not _is_valid_row(row) or external_ref in seen_external_refs:
+        if not _is_valid_row(row) or order_id in seen_order_ids:
             counts["skipped"] += 1
             continue
-        seen_external_refs.add(external_ref)
+        seen_order_ids.add(order_id)
 
         existing = conn.execute(
-            format_query("SELECT order_id FROM orders WHERE external_ref = ?"),
-            (external_ref,),
+            format_query("SELECT order_id FROM orders WHERE order_id = ?"),
+            (order_id,),
         ).fetchone()
         if existing:
             counts["skipped"] += 1
@@ -139,7 +139,7 @@ def load_structured_data(conn):
         delivery_status = normalize_neighborhood(row.get("delivery_status")) or "Pending"
         payment_status = normalize_neighborhood(row.get("payment_status")) or "Pending"
 
-        customer_id, created = _get_or_create_customer(conn, external_ref)
+        customer_id, created = _get_or_create_customer(conn, order_id)
         counts["customers"] += created
 
         address_id, created = _get_or_create_address(conn, customer_id, neighborhood)
@@ -150,16 +150,15 @@ def load_structured_data(conn):
         )
         counts["products"] += created
 
-        cursor = conn.execute(
+        conn.execute(
             format_query(
                 "INSERT INTO orders ("
-                "customer_id, address_id, customer_neighborhood, delivery_status, "
-                "payment_status, external_ref"
+                "order_id, customer_id, address_id, customer_neighborhood, delivery_status, "
+                "payment_status"
                 ") VALUES (?, ?, ?, ?, ?, ?)"
             ),
-            (customer_id, address_id, neighborhood, delivery_status, payment_status, external_ref),
+            (order_id, customer_id, address_id, neighborhood, delivery_status, payment_status),
         )
-        order_id = get_last_row_id(cursor, "orders", "order_id")
         counts["orders"] += 1
 
         conn.execute(

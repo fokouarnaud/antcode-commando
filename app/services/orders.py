@@ -4,7 +4,7 @@ _DEFAULT_CITY = "Douala"
 
 _ORDER_DETAIL_COLUMNS = (
     "order_id, customer_id, address_id, customer_neighborhood, delivery_status, "
-    "payment_status, external_ref, created_at, updated_at"
+    "payment_status, created_at, updated_at"
 )
 
 
@@ -16,23 +16,18 @@ def _select_order_by(conn, column, value):
 
 
 def get_order_by_id(conn, order_id):
-    return _select_order_by(conn, "order_id", order_id)
-
-
-def get_order_by_external_ref(conn, external_ref):
-    """Looks up an order by its human-facing sequential reference (e.g.
-    "ECM-00001") -- the same UNIQUE `external_ref` column list_orders()
-    already surfaces, just resolved as the sole lookup key here.
+    """order_id is the business identifier itself (e.g. "ECM-00795"),
+    not a surrogate integer -- the schema's own PRIMARY KEY.
     """
-    return _select_order_by(conn, "external_ref", external_ref)
+    return _select_order_by(conn, "order_id", order_id)
 
 
 def get_order_by_transaction_reference(conn, external_transaction_id):
     """Looks up an order by a payment's transaction reference (e.g. a
     GeniusPay/MoMo/Orange external_transaction_id), rather than the
-    order's own external_ref -- this is the identifier a payment
-    confirmation actually hands back, not something set at order
-    creation. external_transaction_id is only UNIQUE per (provider,
+    order's own order_id -- this is the identifier a payment
+    confirmation actually hands back, not the order's own business id.
+    external_transaction_id is only UNIQUE per (provider,
     external_transaction_id), so two different providers could in
     principle share the same string against two different orders (see
     test_momo_and_orange_callbacks_reusing_the_same_transaction_id_are_independent);
@@ -111,21 +106,22 @@ def _get_or_create_address(conn, customer_id, neighborhood, city):
 
 def sync_offline_orders(conn, orders):
     """Bulk-ingests orders a field agent's app captured while offline, once
-    connectivity returns. Idempotent on external_ref (UNIQUE in the schema,
-    same dual-layer guarantee -- a pre-flight lookup plus the UNIQUE
-    backstop -- as the payments idempotency lock and the
-    ecommerce_orders_raw ETL in pipeline.py): replaying the same batch after
-    a blackout (e.g. the app retrying because it never saw the first sync's
-    ack) skips every order already synced instead of double-inserting it.
+    connectivity returns. Idempotent on order_id (the schema's own PRIMARY
+    KEY, e.g. "ECM-00795") -- same dual-layer guarantee -- a pre-flight
+    lookup plus the PRIMARY KEY backstop -- as the payments idempotency
+    lock and the ecommerce_orders_raw ETL in pipeline.py: replaying the
+    same batch after a blackout (e.g. the app retrying because it never
+    saw the first sync's ack) skips every order already synced instead of
+    double-inserting it.
     """
     synced = 0
     skipped = 0
 
     for order in orders:
-        external_ref = order["external_ref"]
+        order_id = order["order_id"]
         existing = conn.execute(
-            format_query("SELECT order_id FROM orders WHERE external_ref = ?"),
-            (external_ref,),
+            format_query("SELECT order_id FROM orders WHERE order_id = ?"),
+            (order_id,),
         ).fetchone()
         if existing:
             skipped += 1
@@ -139,16 +135,16 @@ def sync_offline_orders(conn, orders):
 
         conn.execute(
             format_query(
-                "INSERT INTO orders (customer_id, address_id, customer_neighborhood, "
-                "delivery_status, payment_status, external_ref) VALUES (?, ?, ?, ?, ?, ?)"
+                "INSERT INTO orders (order_id, customer_id, address_id, customer_neighborhood, "
+                "delivery_status, payment_status) VALUES (?, ?, ?, ?, ?, ?)"
             ),
             (
+                order_id,
                 customer_id,
                 address_id,
                 neighborhood,
                 order.get("delivery_status", "Pending"),
                 order.get("payment_status", "Pending"),
-                external_ref,
             ),
         )
         synced += 1
@@ -177,8 +173,8 @@ def list_orders(conn, neighborhood=None, status=None, page=1, per_page=20):
     ).fetchone()["n"]
 
     query = (
-        "SELECT order_id, customer_neighborhood, delivery_status, payment_status, "
-        "external_ref FROM orders" + where_clause + " ORDER BY order_id LIMIT ? OFFSET ?"
+        "SELECT order_id, customer_neighborhood, delivery_status, payment_status "
+        "FROM orders" + where_clause + " ORDER BY order_id LIMIT ? OFFSET ?"
     )
     offset = (page - 1) * per_page
     rows = conn.execute(format_query(query), params + [per_page, offset]).fetchall()

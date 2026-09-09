@@ -75,13 +75,13 @@ def test_load_structured_data_creates_customer_address_product_and_order():
     }
 
     order = conn.execute(
-        "SELECT customer_neighborhood, delivery_status, payment_status, external_ref "
+        "SELECT order_id, customer_neighborhood, delivery_status, payment_status "
         "FROM orders"
     ).fetchone()
+    assert order["order_id"] == "ECM-00001"
     assert order["customer_neighborhood"] == "Akwa"
     assert order["delivery_status"] == "Delivered"
     assert order["payment_status"] == "Paid"
-    assert order["external_ref"] == "ECM-00001"
 
     address = conn.execute("SELECT neighborhood, city FROM addresses").fetchone()
     assert address["neighborhood"] == "Akwa"

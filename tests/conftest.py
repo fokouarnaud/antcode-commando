@@ -31,12 +31,12 @@ def app(tmp_path):
         "INSERT INTO addresses (customer_id, neighborhood, city) VALUES (1, 'Akwa', 'Douala')"
     )
     conn.execute(
-        "INSERT INTO orders (customer_id, address_id, customer_neighborhood, delivery_status, "
-        "payment_status, external_ref) VALUES (1, 1, 'Akwa', 'Pending', 'Pending', 'ECM-00001')"
+        "INSERT INTO orders (order_id, customer_id, address_id, customer_neighborhood, "
+        "delivery_status, payment_status) VALUES ('ECM-00001', 1, 1, 'Akwa', 'Pending', 'Pending')"
     )
     conn.execute(
-        "INSERT INTO orders (customer_id, address_id, customer_neighborhood, delivery_status, "
-        "payment_status, external_ref) VALUES (1, 1, 'Akwa', 'Delayed', 'Pending', 'ECM-00002')"
+        "INSERT INTO orders (order_id, customer_id, address_id, customer_neighborhood, "
+        "delivery_status, payment_status) VALUES ('ECM-00002', 1, 1, 'Akwa', 'Delayed', 'Pending')"
     )
     conn.commit()
     conn.close()

@@ -5,7 +5,6 @@ from flask import Blueprint, jsonify, request
 from app import get_db
 from app.services.geniuspay import GeniusPayError, initiate_geniuspay_payment
 from app.services.orders import (
-    get_order_by_external_ref,
     get_order_by_id,
     get_order_by_transaction_reference,
     get_order_checkout_details,
@@ -15,21 +14,19 @@ from app.services.orders import (
 
 orders_bp = Blueprint("orders", __name__)
 
-_EXTERNAL_REF_PREFIX = "ECM-"
+_ORDER_ID_PREFIX = "ECM-"
 
 
 @orders_bp.route("/orders/<id_or_ref>", methods=["GET"])
 def order_detail(id_or_ref):
-    """Accepts either the internal numeric order_id, the sequential
-    external_ref (e.g. "ECM-00001"), or a payment's transaction reference
-    (e.g. a GeniusPay/MoMo/Orange external_transaction_id) -- whichever
-    one the caller actually has on hand.
+    """Accepts either the order's own business order_id (e.g.
+    "ECM-00795") or a payment's transaction reference (e.g. a
+    GeniusPay/MoMo/Orange external_transaction_id) -- whichever one the
+    caller actually has on hand.
     """
     conn = get_db()
-    if id_or_ref.isdigit():
-        order = get_order_by_id(conn, int(id_or_ref))
-    elif id_or_ref.startswith(_EXTERNAL_REF_PREFIX):
-        order = get_order_by_external_ref(conn, id_or_ref)
+    if id_or_ref.startswith(_ORDER_ID_PREFIX):
+        order = get_order_by_id(conn, id_or_ref)
     else:
         order = get_order_by_transaction_reference(conn, id_or_ref)
 
@@ -76,7 +73,7 @@ def orders_sync():
     return jsonify(result), 200
 
 
-@orders_bp.route("/orders/<int:order_id>/checkout", methods=["POST"])
+@orders_bp.route("/orders/<order_id>/checkout", methods=["POST"])
 def order_checkout(order_id):
     details = get_order_checkout_details(get_db(), order_id)
     if details is None:

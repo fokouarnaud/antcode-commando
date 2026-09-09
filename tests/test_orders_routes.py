@@ -4,33 +4,17 @@ from app.config.database import get_connection
 from app.services.geniuspay import GeniusPayError
 
 
-def test_get_order_by_id_returns_order_details(client):
-    response = client.get("/orders/1")
-
-    assert response.status_code == 200
-    body = response.get_json()
-    assert body["order_id"] == 1
-    assert body["customer_neighborhood"] == "Akwa"
-    assert body["delivery_status"] == "Pending"
-    assert body["external_ref"] == "ECM-00001"
-
-
-def test_get_order_by_id_returns_404_for_missing_order(client):
-    response = client.get("/orders/999")
-
-    assert response.status_code == 404
-
-
-def test_get_order_by_external_ref_returns_order_details(client):
+def test_get_order_by_order_id_returns_order_details(client):
     response = client.get("/orders/ECM-00001")
 
     assert response.status_code == 200
     body = response.get_json()
-    assert body["order_id"] == 1
-    assert body["external_ref"] == "ECM-00001"
+    assert body["order_id"] == "ECM-00001"
+    assert body["customer_neighborhood"] == "Akwa"
+    assert body["delivery_status"] == "Pending"
 
 
-def test_get_order_by_unknown_external_ref_returns_404(client):
+def test_get_order_by_unknown_order_id_returns_404(client):
     response = client.get("/orders/ECM-99999")
 
     assert response.status_code == 404
@@ -39,13 +23,13 @@ def test_get_order_by_unknown_external_ref_returns_404(client):
 def test_get_order_by_transaction_reference_returns_order_details(client, app):
     """A payment's own external_transaction_id -- e.g. the reference a
     GeniusPay checkout or a MoMo/Orange callback hands back -- must
-    resolve to the order it was recorded against, distinct from both the
-    numeric order_id and the "ECM-" external_ref.
+    resolve to the order it was recorded against, distinct from the
+    order's own "ECM-" order_id.
     """
     conn = get_connection(app.config["DATABASE_PATH"])
     conn.execute(
         "INSERT INTO payments (order_id, provider, external_transaction_id, amount_fcfa, status) "
-        "VALUES (1, 'geniuspay', 'MTX-A1B2C3D4E5', 12000, 'Successful')"
+        "VALUES ('ECM-00001', 'geniuspay', 'MTX-A1B2C3D4E5', 12000, 'Successful')"
     )
     conn.commit()
 
@@ -53,8 +37,7 @@ def test_get_order_by_transaction_reference_returns_order_details(client, app):
 
     assert response.status_code == 200
     body = response.get_json()
-    assert body["order_id"] == 1
-    assert body["external_ref"] == "ECM-00001"
+    assert body["order_id"] == "ECM-00001"
 
 
 def test_get_order_by_unknown_transaction_reference_returns_404(client):
@@ -68,7 +51,7 @@ def test_list_orders_filters_by_neighborhood_and_status(client):
 
     assert response.status_code == 200
     body = response.get_json()
-    assert [o["external_ref"] for o in body["data"]] == ["ECM-00002"]
+    assert [o["order_id"] for o in body["data"]] == ["ECM-00002"]
 
 
 def test_list_orders_without_filters_returns_all_orders(client):
@@ -86,16 +69,16 @@ def test_list_orders_without_filters_returns_all_orders(client):
 
 
 def test_list_orders_paginates_to_second_page(client):
-    """conftest seeds exactly 2 orders (order_id 1 then 2, ORDER BY order_id):
-    per_page=1 forces two one-item pages, so page=2 must return only the
-    second order -- proving OFFSET actually skips the first page's row
-    rather than just truncating LIMIT from the start every time.
+    """conftest seeds exactly 2 orders (ECM-00001 then ECM-00002, ORDER BY
+    order_id): per_page=1 forces two one-item pages, so page=2 must return
+    only the second order -- proving OFFSET actually skips the first
+    page's row rather than just truncating LIMIT from the start every time.
     """
     response = client.get("/orders?page=2&per_page=1")
 
     assert response.status_code == 200
     body = response.get_json()
-    assert [o["external_ref"] for o in body["data"]] == ["ECM-00002"]
+    assert [o["order_id"] for o in body["data"]] == ["ECM-00002"]
     assert body["pagination"] == {
         "page": 2,
         "per_page": 1,
@@ -111,7 +94,7 @@ def test_checkout_returns_checkout_url_and_transaction_reference_on_success(mock
         "transaction_reference": "GPAY-REF-001",
     }
 
-    response = client.post("/orders/1/checkout")
+    response = client.post("/orders/ECM-00001/checkout")
 
     assert response.status_code == 200
     assert response.get_json() == {
@@ -119,13 +102,13 @@ def test_checkout_returns_checkout_url_and_transaction_reference_on_success(mock
         "transaction_reference": "GPAY-REF-001",
     }
     mock_initiate.assert_called_once_with(
-        1, 0, customer_phone="+237690000001", customer_name="Amina Njoya"
+        "ECM-00001", 0, customer_phone="+237690000001", customer_name="Amina Njoya"
     )
 
 
 @patch("app.routes.orders.initiate_geniuspay_payment")
 def test_checkout_returns_404_for_missing_order(mock_initiate, client):
-    response = client.post("/orders/999/checkout")
+    response = client.post("/orders/ECM-99999/checkout")
 
     assert response.status_code == 404
     mock_initiate.assert_not_called()
@@ -135,7 +118,7 @@ def test_checkout_returns_404_for_missing_order(mock_initiate, client):
 def test_checkout_returns_502_when_geniuspay_fails(mock_initiate, client):
     mock_initiate.side_effect = GeniusPayError("GeniusPay payment initiation failed")
 
-    response = client.post("/orders/1/checkout")
+    response = client.post("/orders/ECM-00001/checkout")
 
     assert response.status_code == 502
     assert response.get_json() == {"error": "payment initiation failed"}
@@ -143,7 +126,7 @@ def test_checkout_returns_502_when_geniuspay_fails(mock_initiate, client):
 
 def sync_batch(**overrides):
     order = {
-        "external_ref": "OFFLINE-0001",
+        "order_id": "OFFLINE-0001",
         "customer_name": "Jean Foka",
         "customer_phone": "+237699999901",
         "neighborhood": "Bonapriso",
@@ -156,7 +139,7 @@ def test_sync_inserts_new_orders_and_reports_counts(client, app):
     payload = [
         sync_batch()[0],
         {
-            "external_ref": "OFFLINE-0002",
+            "order_id": "OFFLINE-0002",
             "customer_name": "Marie Ekwalla",
             "customer_phone": "+237699999902",
             "neighborhood": "Deido",
@@ -170,11 +153,11 @@ def test_sync_inserts_new_orders_and_reports_counts(client, app):
 
     conn = get_connection(app.config["DATABASE_PATH"])
     count = conn.execute(
-        "SELECT COUNT(*) AS n FROM orders WHERE external_ref IN ('OFFLINE-0001', 'OFFLINE-0002')"
+        "SELECT COUNT(*) AS n FROM orders WHERE order_id IN ('OFFLINE-0001', 'OFFLINE-0002')"
     ).fetchone()["n"]
     assert count == 2
     order = conn.execute(
-        "SELECT delivery_status, payment_status FROM orders WHERE external_ref = 'OFFLINE-0001'"
+        "SELECT delivery_status, payment_status FROM orders WHERE order_id = 'OFFLINE-0001'"
     ).fetchone()
     assert order["delivery_status"] == "Pending"
     assert order["payment_status"] == "Pending"
@@ -186,7 +169,7 @@ def test_sync_is_idempotent_on_replayed_batch(client, app):
     the identical batch must skip every already-synced order rather than
     inserting duplicates or splitting them into a second bucket.
     """
-    payload = sync_batch(external_ref="OFFLINE-0003", customer_phone="+237699999903")
+    payload = sync_batch(order_id="OFFLINE-0003", customer_phone="+237699999903")
 
     first = client.post("/orders/sync", json=payload)
     second = client.post("/orders/sync", json=payload)
@@ -198,7 +181,7 @@ def test_sync_is_idempotent_on_replayed_batch(client, app):
 
     conn = get_connection(app.config["DATABASE_PATH"])
     count = conn.execute(
-        "SELECT COUNT(*) AS n FROM orders WHERE external_ref = 'OFFLINE-0003'"
+        "SELECT COUNT(*) AS n FROM orders WHERE order_id = 'OFFLINE-0003'"
     ).fetchone()["n"]
     assert count == 1
     customer_count = conn.execute(
@@ -213,13 +196,13 @@ def test_sync_reuses_existing_customer_and_address_across_orders(client, app):
     """
     payload = [
         {
-            "external_ref": "OFFLINE-0004",
+            "order_id": "OFFLINE-0004",
             "customer_name": "Paul Biya Jr",
             "customer_phone": "+237699999904",
             "neighborhood": "Akwa",
         },
         {
-            "external_ref": "OFFLINE-0005",
+            "order_id": "OFFLINE-0005",
             "customer_name": "Paul Biya Jr",
             "customer_phone": "+237699999904",
             "neighborhood": "Akwa",
@@ -244,6 +227,6 @@ def test_sync_returns_400_for_non_array_payload(client):
 
 
 def test_sync_returns_400_for_order_missing_required_field(client):
-    response = client.post("/orders/sync", json=[{"external_ref": "OFFLINE-0006"}])
+    response = client.post("/orders/sync", json=[{"order_id": "OFFLINE-0006"}])
 
     assert response.status_code == 400
