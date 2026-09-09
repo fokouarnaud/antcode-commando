@@ -7,11 +7,11 @@ def test_openapi_json_documents_webhook_and_order_lookup_paths(client):
     assert set(spec["paths"]) == {
         "/webhook/{provider}",
         "/orders",
-        "/orders/{order_id}",
+        "/orders/{id_or_ref}",
     }
     assert "post" in spec["paths"]["/webhook/{provider}"]
     assert "get" in spec["paths"]["/orders"]
-    assert "get" in spec["paths"]["/orders/{order_id}"]
+    assert "get" in spec["paths"]["/orders/{id_or_ref}"]
 
 
 def test_docs_route_serves_html_referencing_the_openapi_spec(client):

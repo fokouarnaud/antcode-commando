@@ -161,7 +161,7 @@ reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
 | Route | Method | Purpose |
 |---|---|---|
 | `/orders` | GET | List orders, optional `?neighborhood=` and/or `?status=` filters — served by `idx_orders_neighborhood_status` — plus `?page=` (default 1) and `?per_page=` (default 20). Response is `{"data": [...], "pagination": {"page", "per_page", "total_records", "total_pages"}}` |
-| `/orders/{order_id}` | GET | Fetch a single order (404 if unknown) |
+| `/orders/{id_or_ref}` | GET | Fetch a single order by internal `order_id` (e.g. `1`), sequential `external_ref` (e.g. `ECM-00001`), or a payment's transaction reference (e.g. `MTX-A1B2C3D4E5`) — whichever one the caller has on hand. 404 if none match |
 | `/orders/{order_id}/checkout` | POST | Triggers `initiate_geniuspay_payment()` (`app/services/geniuspay.py`) for the order's total and returns `{"checkout_url", "transaction_reference"}`. 404 if the order doesn't exist, 502 if the outbound GeniusPay call fails |
 | `/orders/sync` | POST | Bulk-ingests a JSON array of offline-captured orders (`app/services/orders.py::sync_offline_orders`). Idempotent on `external_ref`: replaying an identical batch after a connectivity blackout skips every already-synced order instead of duplicating it. Returns `{"synced", "skipped"}` |
 | `/webhook/{provider}` | POST | Payment callback for the named provider (`momo`, `orange`, `campay`, `smobilpay`, `geniuspay`). Requires that provider's own signature header (e.g. `X-Momo-Signature`, `X-Campay-Signature`, or `X-Webhook-Signature` + `X-Webhook-Timestamp` + `X-Webhook-Event` for `geniuspay`) keyed with its own secret, resolved dynamically from `_PROVIDER_CONFIG`. Idempotent on `(provider, external_transaction_id)`; an unrecognized `provider` returns 500 |
@@ -237,10 +237,22 @@ Either way, expected response:
 {"status": "processed", "payment_id": 1}
 ```
 
-Confirm the order flipped to `Paid`:
+Confirm the order flipped to `Paid`, by `order_id`:
 
 ```bash
 curl http://127.0.0.1:5000/orders/1
+```
+
+Or fetch the exact same order state using the *transaction reference*
+the callback just recorded — no `order_id` needed at all, exactly what a
+GeniusPay/MoMo/Orange confirmation screen would hand a customer back
+(`GET /orders/{id_or_ref}` resolves this through
+`get_order_by_transaction_reference()` against `payments.external_transaction_id`,
+app/services/orders.py):
+
+```bash
+curl http://127.0.0.1:5000/orders/GPAY-DEMO-01      # if you used Option A
+curl http://127.0.0.1:5000/orders/SIM-DEMO-01       # if you used Option B
 ```
 
 #### Scenario 3 — Double-Entry Replay Attack Safeguard
@@ -273,7 +285,7 @@ in the schema) catches it before any insert, exactly as proven by
 python -m pytest -v
 ```
 
-78 tests, 100% passing (`python -m pytest -v`). Every behavior above —
+82 tests, 100% passing (`python -m pytest -v`). Every behavior above —
 including the schema, the ETL, the dual-engine connection layer, the
 multi-provider webhooks, the GeniusPay checkout/webhook lifecycle, the
 offline sync endpoint, and the paginated order lookup — was written

@@ -21,6 +21,48 @@ def test_get_order_by_id_returns_404_for_missing_order(client):
     assert response.status_code == 404
 
 
+def test_get_order_by_external_ref_returns_order_details(client):
+    response = client.get("/orders/ECM-00001")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["order_id"] == 1
+    assert body["external_ref"] == "ECM-00001"
+
+
+def test_get_order_by_unknown_external_ref_returns_404(client):
+    response = client.get("/orders/ECM-99999")
+
+    assert response.status_code == 404
+
+
+def test_get_order_by_transaction_reference_returns_order_details(client, app):
+    """A payment's own external_transaction_id -- e.g. the reference a
+    GeniusPay checkout or a MoMo/Orange callback hands back -- must
+    resolve to the order it was recorded against, distinct from both the
+    numeric order_id and the "ECM-" external_ref.
+    """
+    conn = get_connection(app.config["DATABASE_PATH"])
+    conn.execute(
+        "INSERT INTO payments (order_id, provider, external_transaction_id, amount_fcfa, status) "
+        "VALUES (1, 'geniuspay', 'MTX-A1B2C3D4E5', 12000, 'Successful')"
+    )
+    conn.commit()
+
+    response = client.get("/orders/MTX-A1B2C3D4E5")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["order_id"] == 1
+    assert body["external_ref"] == "ECM-00001"
+
+
+def test_get_order_by_unknown_transaction_reference_returns_404(client):
+    response = client.get("/orders/MTX-UNKNOWN-REF")
+
+    assert response.status_code == 404
+
+
 def test_list_orders_filters_by_neighborhood_and_status(client):
     response = client.get("/orders?neighborhood=Akwa&status=Delayed")
 

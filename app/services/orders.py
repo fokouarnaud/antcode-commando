@@ -2,15 +2,52 @@ from app.config.database import format_query, get_last_row_id
 
 _DEFAULT_CITY = "Douala"
 
+_ORDER_DETAIL_COLUMNS = (
+    "order_id, customer_id, address_id, customer_neighborhood, delivery_status, "
+    "payment_status, external_ref, created_at, updated_at"
+)
+
+
+def _select_order_by(conn, column, value):
+    return conn.execute(
+        format_query(f"SELECT {_ORDER_DETAIL_COLUMNS} FROM orders WHERE {column} = ?"),
+        (value,),
+    ).fetchone()
+
 
 def get_order_by_id(conn, order_id):
-    return conn.execute(
+    return _select_order_by(conn, "order_id", order_id)
+
+
+def get_order_by_external_ref(conn, external_ref):
+    """Looks up an order by its human-facing sequential reference (e.g.
+    "ECM-00001") -- the same UNIQUE `external_ref` column list_orders()
+    already surfaces, just resolved as the sole lookup key here.
+    """
+    return _select_order_by(conn, "external_ref", external_ref)
+
+
+def get_order_by_transaction_reference(conn, external_transaction_id):
+    """Looks up an order by a payment's transaction reference (e.g. a
+    GeniusPay/MoMo/Orange external_transaction_id), rather than the
+    order's own external_ref -- this is the identifier a payment
+    confirmation actually hands back, not something set at order
+    creation. external_transaction_id is only UNIQUE per (provider,
+    external_transaction_id), so two different providers could in
+    principle share the same string against two different orders (see
+    test_momo_and_orange_callbacks_reusing_the_same_transaction_id_are_independent);
+    ordering by payment_id DESC picks the most recently recorded match.
+    """
+    row = conn.execute(
         format_query(
-            "SELECT order_id, customer_id, address_id, customer_neighborhood, delivery_status, "
-            "payment_status, external_ref, created_at, updated_at FROM orders WHERE order_id = ?"
+            "SELECT order_id FROM payments WHERE external_transaction_id = ? "
+            "ORDER BY payment_id DESC LIMIT 1"
         ),
-        (order_id,),
+        (external_transaction_id,),
     ).fetchone()
+    if row is None:
+        return None
+    return get_order_by_id(conn, row["order_id"])
 
 
 def get_order_checkout_details(conn, order_id):

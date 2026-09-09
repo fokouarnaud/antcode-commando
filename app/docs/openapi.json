@@ -142,15 +142,17 @@
         }
       }
     },
-    "/orders/{order_id}": {
+    "/orders/{id_or_ref}": {
       "get": {
-        "summary": "Fetch a single order by its internal id",
+        "summary": "Fetch a single order by id, external_ref, or transaction reference",
+        "description": "Accepts three different identifier shapes in the same path segment (app/routes/orders.py::order_detail): an all-digit string resolves as the internal integer order_id; a string starting with \"ECM-\" resolves against the order's own external_ref (its sequential business reference, e.g. from the demo dataset or /orders/sync); anything else is looked up as a payment's external_transaction_id (e.g. a GeniusPay/MoMo/Orange transaction reference) via app/services/orders.py::get_order_by_transaction_reference, returning the order that payment was recorded against.",
         "parameters": [
           {
-            "name": "order_id",
+            "name": "id_or_ref",
             "in": "path",
             "required": true,
-            "schema": { "type": "integer" }
+            "description": "order_id (e.g. \"1\"), external_ref (e.g. \"ECM-00001\"), or a transaction reference (e.g. \"MTX-A1B2C3D4E5\")",
+            "schema": { "type": "string", "example": "ECM-00001" }
           }
         ],
         "responses": {
@@ -162,7 +164,7 @@
               }
             }
           },
-          "404": { "description": "No order with that id" }
+          "404": { "description": "No order matches that id_or_ref under any of the three lookup rules" }
         }
       }
     },
