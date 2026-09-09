@@ -48,6 +48,19 @@ def get_last_row_id(cursor, table_name, id_column="id"):
     return cursor.lastrowid
 
 
+def integrity_errors():
+    """Returns the exception class(es) that signal a constraint violation
+    (e.g. a FOREIGN KEY RESTRICT) for whichever engine is active, so routes
+    can catch a delete/insert conflict without importing psycopg2 directly
+    -- psycopg2 is only installed/importable when DB_ENGINE=postgresql.
+    """
+    if get_engine() == "postgresql":
+        import psycopg2
+
+        return (psycopg2.IntegrityError,)
+    return (sqlite3.IntegrityError,)
+
+
 def init_db(conn):
     if get_engine() == "postgresql":
         with conn.cursor() as cursor:

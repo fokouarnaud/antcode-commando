@@ -10,7 +10,7 @@ def test_get_order_by_order_id_returns_order_details(client):
     assert response.status_code == 200
     body = response.get_json()
     assert body["order_id"] == "ECM-00001"
-    assert body["customer_neighborhood"] == "Akwa"
+    assert body["neighborhood"] == "Akwa"
     assert body["delivery_status"] == "Pending"
 
 
@@ -47,7 +47,7 @@ def test_get_order_by_unknown_transaction_reference_returns_404(client):
 
 
 def test_list_orders_filters_by_neighborhood_and_status(client):
-    response = client.get("/orders?neighborhood=Akwa&status=Delayed")
+    response = client.get("/orders?neighborhood=Akwa&status=Shipped")
 
     assert response.status_code == 200
     body = response.get_json()
@@ -102,7 +102,7 @@ def test_checkout_returns_checkout_url_and_transaction_reference_on_success(mock
         "transaction_reference": "GPAY-REF-001",
     }
     mock_initiate.assert_called_once_with(
-        "ECM-00001", 0, customer_phone="+237690000001", customer_name="Amina Njoya"
+        "ECM-00001", 75000, customer_phone="+237690000001", customer_name="Amina Njoya"
     )
 
 
@@ -130,6 +130,10 @@ def sync_batch(**overrides):
         "customer_name": "Jean Foka",
         "customer_phone": "+237699999901",
         "neighborhood": "Bonapriso",
+        "product_name": "Smartphone Tecno Spark",
+        "category": "Electronics",
+        "unit_price_fcfa": 75000,
+        "quantity": 1,
     }
     order.update(overrides)
     return [order]
@@ -143,6 +147,10 @@ def test_sync_inserts_new_orders_and_reports_counts(client, app):
             "customer_name": "Marie Ekwalla",
             "customer_phone": "+237699999902",
             "neighborhood": "Deido",
+            "product_name": "Smartphone Tecno Spark",
+            "category": "Electronics",
+            "unit_price_fcfa": 75000,
+            "quantity": 1,
         },
     ]
 
@@ -200,12 +208,20 @@ def test_sync_reuses_existing_customer_and_address_across_orders(client, app):
             "customer_name": "Paul Biya Jr",
             "customer_phone": "+237699999904",
             "neighborhood": "Akwa",
+            "product_name": "Smartphone Tecno Spark",
+            "category": "Electronics",
+            "unit_price_fcfa": 75000,
+            "quantity": 1,
         },
         {
             "order_id": "OFFLINE-0005",
             "customer_name": "Paul Biya Jr",
             "customer_phone": "+237699999904",
             "neighborhood": "Akwa",
+            "product_name": "Smartphone Tecno Spark",
+            "category": "Electronics",
+            "unit_price_fcfa": 75000,
+            "quantity": 1,
         },
     ]
 
@@ -230,3 +246,122 @@ def test_sync_returns_400_for_order_missing_required_field(client):
     response = client.post("/orders/sync", json=[{"order_id": "OFFLINE-0006"}])
 
     assert response.status_code == 400
+
+
+def test_create_order_with_existing_customer_and_product_returns_201(client, app):
+    response = client.post("/orders", json={
+        "customer_id": 1,
+        "address_id": 1,
+        "product_id": 1,
+        "quantity": 2,
+    })
+
+    assert response.status_code == 201
+    body = response.get_json()
+    assert body["order_id"] == "ECM-00003"
+    assert body["quantity"] == 2
+    assert body["unit_price_fcfa"] == 75000
+    assert body["delivery_status"] == "Pending"
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    count = conn.execute(
+        "SELECT COUNT(*) AS n FROM orders WHERE order_id = 'ECM-00003'"
+    ).fetchone()["n"]
+    assert count == 1
+
+
+def test_create_order_with_new_customer_and_new_product_returns_201(client):
+    response = client.post("/orders", json={
+        "customer_name": "Divine Talla",
+        "customer_phone": "+237677000001",
+        "neighborhood": "Bastos",
+        "city": "Yaounde",
+        "product_name": "LED Television 32-inch",
+        "category": "Electronics",
+        "unit_price_fcfa": 120000,
+        "quantity": 1,
+    })
+
+    assert response.status_code == 201
+    body = response.get_json()
+    assert body["customer_name"] == "Divine Talla"
+    assert body["neighborhood"] == "Bastos"
+    assert body["product_name"] == "LED Television 32-inch"
+
+
+def test_create_order_returns_400_for_invalid_quantity(client):
+    response = client.post("/orders", json={
+        "customer_id": 1,
+        "address_id": 1,
+        "product_id": 1,
+        "quantity": 0,
+    })
+
+    assert response.status_code == 400
+
+
+def test_create_order_returns_400_for_missing_field(client):
+    response = client.post("/orders", json={"customer_id": 1, "address_id": 1})
+
+    assert response.status_code == 400
+
+
+def test_update_order_tracking_updates_delivery_status(client, app):
+    response = client.put("/orders/ECM-00001", json={"delivery_status": "Delivered"})
+
+    assert response.status_code == 200
+    assert response.get_json()["delivery_status"] == "Delivered"
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    order = conn.execute(
+        "SELECT delivery_status FROM orders WHERE order_id = 'ECM-00001'"
+    ).fetchone()
+    assert order["delivery_status"] == "Delivered"
+
+
+def test_update_order_tracking_returns_400_for_invalid_status(client):
+    response = client.put("/orders/ECM-00001", json={"delivery_status": "InTransit"})
+
+    assert response.status_code == 400
+
+
+def test_update_order_tracking_returns_404_for_unknown_order(client):
+    response = client.put("/orders/ECM-99999", json={"delivery_status": "Shipped"})
+
+    assert response.status_code == 404
+
+
+def test_delete_order_removes_it(client, app):
+    response = client.delete("/orders/ECM-00002")
+
+    assert response.status_code == 204
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    count = conn.execute(
+        "SELECT COUNT(*) AS n FROM orders WHERE order_id = 'ECM-00002'"
+    ).fetchone()["n"]
+    assert count == 0
+
+
+def test_delete_order_returns_404_for_unknown_order(client):
+    response = client.delete("/orders/ECM-99999")
+
+    assert response.status_code == 404
+
+
+def test_delete_order_returns_409_when_payments_exist(client, app):
+    conn = get_connection(app.config["DATABASE_PATH"])
+    conn.execute(
+        "INSERT INTO payments (order_id, provider, external_transaction_id, amount_fcfa, status) "
+        "VALUES ('ECM-00001', 'geniuspay', 'MTX-DEL-001', 75000, 'Successful')"
+    )
+    conn.commit()
+
+    response = client.delete("/orders/ECM-00001")
+
+    assert response.status_code == 409
+
+    count = conn.execute(
+        "SELECT COUNT(*) AS n FROM orders WHERE order_id = 'ECM-00001'"
+    ).fetchone()["n"]
+    assert count == 1

@@ -7,12 +7,16 @@ def create_app():
     app = flask.Flask(__name__)
     app.config.from_object("app.config.settings.Config")
 
+    from app.routes.customers import customers_bp
     from app.routes.docs import docs_bp
     from app.routes.orders import orders_bp
+    from app.routes.products import products_bp
     from app.routes.webhooks import webhooks_bp
 
     app.register_blueprint(webhooks_bp)
     app.register_blueprint(orders_bp)
+    app.register_blueprint(products_bp)
+    app.register_blueprint(customers_bp)
     app.register_blueprint(docs_bp)
 
     @app.teardown_appcontext

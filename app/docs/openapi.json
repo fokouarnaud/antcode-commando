@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "AntCode Commando - E-Commerce Logistics API",
-    "version": "1.0.0",
-    "description": "Order lookups over the customer_neighborhood/delivery_status composite index, and a single idempotent /webhook/{provider} payment callback shared by MTN MoMo, Orange Money, Campay, Smobilpay, and GeniusPay."
+    "version": "2.0.0",
+    "description": "Full CRUD over a normalized 5-table schema (customers, addresses, products, orders, payments) populated with Cameroonian volume data, plus a single idempotent /webhook/{provider} payment callback shared by MTN MoMo, Orange Money, Campay, Smobilpay, and GeniusPay."
   },
   "components": {
     "securitySchemes": {
@@ -18,19 +18,55 @@
       "Order": {
         "type": "object",
         "properties": {
-          "order_id": { "type": "integer" },
-          "customer_neighborhood": { "type": "string", "example": "Akwa" },
+          "order_id": { "type": "string", "example": "ECM-00001" },
+          "customer_id": { "type": "integer" },
+          "address_id": { "type": "integer" },
+          "product_id": { "type": "integer" },
+          "quantity": { "type": "integer", "example": 2 },
+          "unit_price_fcfa": { "type": "integer", "example": 75000 },
+          "neighborhood": { "type": "string", "example": "Akwa" },
+          "city": { "type": "string", "example": "Douala" },
           "delivery_status": {
             "type": "string",
-            "example": "Delivered",
-            "enum": ["Pending", "In Transit", "Delivered", "Delayed", "Returned", "Cancelled"]
+            "example": "Shipped",
+            "enum": ["Pending", "Shipped", "Delivered"]
           },
           "payment_status": {
             "type": "string",
             "example": "Paid",
             "enum": ["Pending", "Paid", "Failed"]
-          },
-          "external_ref": { "type": "string", "example": "ECM-00001" }
+          }
+        }
+      },
+      "Product": {
+        "type": "object",
+        "properties": {
+          "product_id": { "type": "integer" },
+          "name": { "type": "string", "example": "Smartphone Tecno Spark" },
+          "category": { "type": "string", "example": "Electronics" },
+          "unit_price_fcfa": { "type": "integer", "example": 95000 },
+          "stock_quantity": { "type": "integer", "example": 50 }
+        }
+      },
+      "Address": {
+        "type": "object",
+        "properties": {
+          "address_id": { "type": "integer" },
+          "neighborhood": { "type": "string", "example": "Akwa" },
+          "city": { "type": "string", "example": "Douala" },
+          "street_details": { "type": "string", "nullable": true }
+        }
+      },
+      "Customer": {
+        "type": "object",
+        "properties": {
+          "customer_id": { "type": "integer" },
+          "full_name": { "type": "string", "example": "Amina Njoya" },
+          "phone_number": { "type": "string", "example": "+237690000001" },
+          "addresses": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Address" }
+          }
         }
       },
       "Pagination": {
@@ -47,7 +83,7 @@
         "description": "Flat callback shape shared by momo, orange, campay, and smobilpay.",
         "required": ["order_id", "external_transaction_id", "amount_fcfa", "status"],
         "properties": {
-          "order_id": { "type": "integer", "example": 1 },
+          "order_id": { "type": "string", "example": "ECM-00001" },
           "external_transaction_id": { "type": "string", "example": "MOMO-TX-0001" },
           "amount_fcfa": { "type": "integer", "example": 15000 },
           "status": { "type": "string", "enum": ["SUCCESSFUL", "FAILED"] }
@@ -68,7 +104,7 @@
                 "type": "object",
                 "required": ["order_id"],
                 "properties": {
-                  "order_id": { "type": "integer", "example": 1 }
+                  "order_id": { "type": "string", "example": "ECM-00001" }
                 }
               }
             }
@@ -88,7 +124,7 @@
     "/orders": {
       "get": {
         "summary": "List orders, optionally filtered by neighborhood and/or delivery status",
-        "description": "Backed by idx_orders_neighborhood_status: a neighborhood-only filter uses the index's leading column, neighborhood+status uses the full composite seek.",
+        "description": "Neighborhood filtering joins to addresses (idx_addresses_neighborhood_city + idx_orders_address_id); status filtering uses idx_orders_delivery_status. See docs/indexing_and_query_optimization_report.md.",
         "parameters": [
           {
             "name": "neighborhood",
@@ -101,8 +137,8 @@
             "name": "status",
             "in": "query",
             "required": false,
-            "schema": { "type": "string" },
-            "example": "Delayed"
+            "schema": { "type": "string", "enum": ["Pending", "Shipped", "Delivered"] },
+            "example": "Shipped"
           },
           {
             "name": "page",
@@ -140,18 +176,33 @@
             }
           }
         }
+      },
+      "post": {
+        "summary": "Create a single order",
+        "description": "Accepts customer_id or customer_name+customer_phone+neighborhood(+city) (get-or-create), and product_id or product_name+category+unit_price_fcfa (get-or-create), plus quantity. order_id is auto-generated (ECM-NNNNN) if omitted.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Order created",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Order" } } }
+          },
+          "400": { "description": "Missing required field or invalid value (e.g. non-positive quantity)" }
+        }
       }
     },
     "/orders/{id_or_ref}": {
       "get": {
-        "summary": "Fetch a single order by id, external_ref, or transaction reference",
-        "description": "Accepts three different identifier shapes in the same path segment (app/routes/orders.py::order_detail): an all-digit string resolves as the internal integer order_id; a string starting with \"ECM-\" resolves against the order's own external_ref (its sequential business reference, e.g. from the demo dataset or /orders/sync); anything else is looked up as a payment's external_transaction_id (e.g. a GeniusPay/MoMo/Orange transaction reference) via app/services/orders.py::get_order_by_transaction_reference, returning the order that payment was recorded against.",
+        "summary": "Fetch a single order by order_id or transaction reference",
+        "description": "app/routes/orders.py::order_detail: a string starting with \"ECM-\" resolves against the order's own order_id; anything else is looked up as a payment's external_transaction_id (e.g. a GeniusPay/MoMo/Orange transaction reference) via app/services/orders.py::get_order_by_transaction_reference, returning the order that payment was recorded against.",
         "parameters": [
           {
             "name": "id_or_ref",
             "in": "path",
             "required": true,
-            "description": "order_id (e.g. \"1\"), external_ref (e.g. \"ECM-00001\"), or a transaction reference (e.g. \"MTX-A1B2C3D4E5\")",
+            "description": "order_id (e.g. \"ECM-00001\") or a payment transaction reference (e.g. \"MTX-A1B2C3D4E5\")",
             "schema": { "type": "string", "example": "ECM-00001" }
           }
         ],
@@ -164,7 +215,224 @@
               }
             }
           },
-          "404": { "description": "No order matches that id_or_ref under any of the three lookup rules" }
+          "404": { "description": "No order matches that id_or_ref under either lookup rule" }
+        }
+      }
+    },
+    "/orders/{order_id}": {
+      "put": {
+        "summary": "Update an order's tracking state",
+        "description": "Updates delivery_status and/or payment_status only -- customer/product/quantity are immutable after creation.",
+        "parameters": [
+          { "name": "order_id", "in": "path", "required": true, "schema": { "type": "string", "example": "ECM-00001" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "delivery_status": { "type": "string", "enum": ["Pending", "Shipped", "Delivered"] },
+                  "payment_status": { "type": "string", "enum": ["Pending", "Paid", "Failed"] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Updated order", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Order" } } } },
+          "400": { "description": "Invalid delivery_status or payment_status value" },
+          "404": { "description": "order_id does not exist" }
+        }
+      },
+      "delete": {
+        "summary": "Delete an order",
+        "parameters": [
+          { "name": "order_id", "in": "path", "required": true, "schema": { "type": "string", "example": "ECM-00001" } }
+        ],
+        "responses": {
+          "204": { "description": "Deleted" },
+          "404": { "description": "order_id does not exist" },
+          "409": { "description": "order still has payments recorded against it" }
+        }
+      }
+    },
+    "/orders/sync": {
+      "post": {
+        "summary": "Bulk-ingest offline-captured orders",
+        "description": "Idempotent on order_id: replaying an identical batch after a connectivity blackout skips every already-synced order instead of duplicating it.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "array", "items": { "type": "object" } } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Sync result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "synced": { "type": "integer" }, "skipped": { "type": "integer" } }
+                }
+              }
+            }
+          },
+          "400": { "description": "Payload is not a JSON array, or an order is missing a required field" }
+        }
+      }
+    },
+    "/orders/{order_id}/checkout": {
+      "post": {
+        "summary": "Initiate a GeniusPay checkout session for an order",
+        "parameters": [
+          { "name": "order_id", "in": "path", "required": true, "schema": { "type": "string", "example": "ECM-00001" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checkout session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "checkout_url": { "type": "string" }, "transaction_reference": { "type": "string" } }
+                }
+              }
+            }
+          },
+          "404": { "description": "order_id does not exist" },
+          "502": { "description": "The outbound GeniusPay request failed" }
+        }
+      }
+    },
+    "/products": {
+      "get": {
+        "summary": "List products (paginated)",
+        "parameters": [
+          { "name": "page", "in": "query", "required": false, "schema": { "type": "integer", "default": 1 } },
+          { "name": "per_page", "in": "query", "required": false, "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching products, paginated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Product" } },
+                    "pagination": { "$ref": "#/components/schemas/Pagination" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a product",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } }
+        },
+        "responses": {
+          "201": { "description": "Product created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } } },
+          "400": { "description": "Missing/invalid name, category, unit_price_fcfa, or stock_quantity" }
+        }
+      }
+    },
+    "/products/{product_id}": {
+      "put": {
+        "summary": "Partially update a product",
+        "parameters": [
+          { "name": "product_id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated product", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } } },
+          "400": { "description": "Invalid unit_price_fcfa or stock_quantity" },
+          "404": { "description": "product_id does not exist" }
+        }
+      },
+      "delete": {
+        "summary": "Delete a product",
+        "parameters": [
+          { "name": "product_id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "204": { "description": "Deleted" },
+          "404": { "description": "product_id does not exist" },
+          "409": { "description": "product is referenced by an existing order" }
+        }
+      }
+    },
+    "/customers": {
+      "post": {
+        "summary": "Create a customer together with its first address",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["full_name", "phone_number", "neighborhood", "city"],
+                "properties": {
+                  "full_name": { "type": "string" },
+                  "phone_number": { "type": "string", "example": "+2376XXXXXXXX" },
+                  "neighborhood": { "type": "string" },
+                  "city": { "type": "string" },
+                  "street_details": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Customer created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } } },
+          "400": { "description": "Missing required field or phone_number not in +2376XXXXXXXX format" },
+          "409": { "description": "phone_number already registered to another customer" }
+        }
+      }
+    },
+    "/customers/{customer_id}": {
+      "get": {
+        "summary": "Fetch a customer with its addresses",
+        "parameters": [
+          { "name": "customer_id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "The customer", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } } },
+          "404": { "description": "customer_id does not exist" }
+        }
+      },
+      "put": {
+        "summary": "Update a customer and/or its primary address",
+        "parameters": [
+          { "name": "customer_id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated customer", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } } },
+          "400": { "description": "Invalid phone_number format" },
+          "404": { "description": "customer_id does not exist" },
+          "409": { "description": "phone_number already registered to another customer" }
+        }
+      },
+      "delete": {
+        "summary": "Delete a customer and its addresses",
+        "parameters": [
+          { "name": "customer_id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "204": { "description": "Deleted" },
+          "404": { "description": "customer_id does not exist" },
+          "409": { "description": "customer has existing orders" }
         }
       }
     },

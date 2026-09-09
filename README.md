@@ -1,19 +1,18 @@
 # AntCode Commando — E-Commerce Logistics Platform
 
-A Cameroon-focused e-commerce logistics backend: it ingests a deliberately
-messy raw orders export, cleans and normalizes it into a relational SQLite
-schema, exposes neighborhood/delivery-status order lookups over a composite
-index built for that access pattern, and processes idempotent MTN MoMo /
-Orange Money payment callbacks. Built strictly test-first — see
+A Cameroon-focused e-commerce logistics backend: a clean, secure relational
+CRUD architecture over a 5-table normalized schema (customers, addresses,
+products, orders, payments), populated with realistic Cameroonian volume via
+`scripts/seed_cameroon_volume.py`, exposing full CRUD for products/customers/
+orders plus idempotent MTN MoMo / Orange Money / Campay / Smobilpay /
+GeniusPay payment callbacks. Built strictly test-first — see
 [`.agents/skills/test-driven-development/SKILL.md`](.agents/skills/test-driven-development/SKILL.md).
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    CSV["data/ecommerce_orders_messy_data.csv\n(messy generator output)"]
-    RAW[("ecommerce_orders_raw\n(flat import table)")]
-    PIPE["app/services/pipeline.py\nload_structured_data()"]
+    SEED["scripts/seed_cameroon_volume.py\n(500 Cameroonian volume logs)"]
 
     subgraph CFG["app/config/database.py"]
         ENGINE["get_engine() / format_query()\nDB_ENGINE env toggle"]
@@ -24,50 +23,41 @@ flowchart LR
         PG_SQL["schema_postgres.sql"]
     end
 
-    subgraph DB["6 normalized tables (sqlite3 or psycopg2, same schema shape)"]
+    subgraph DB["5 normalized tables (sqlite3 or psycopg2, same schema shape)"]
         CUST[("customers")]
         ADDR[("addresses")]
         PROD[("products")]
-        ORD[("orders\n+ idx_orders_neighborhood_status")]
-        ITEMS[("order_items")]
+        ORD[("orders\n+ idx_orders_delivery_status")]
         PAY[("payments\nUNIQUE(provider, external_transaction_id)")]
     end
 
     subgraph API["Flask app (app/__init__.py: create_app)"]
-        ORD_R["GET /orders (filter + paginate)\nGET /orders/{id}\napp/routes/orders.py"]
-        HOOK_MOMO["POST /webhook/momo\nX-Momo-Signature"]
-        HOOK_ORANGE["POST /webhook/orange\nX-Orange-Signature"]
+        PROD_R["GET/POST /products\nPUT/DELETE /products/{id}\napp/routes/products.py"]
+        CUST_R["POST /customers\nGET/PUT/DELETE /customers/{id}\napp/routes/customers.py"]
+        ORD_R["GET/POST /orders\nGET/PUT/DELETE /orders/{id}\napp/routes/orders.py"]
+        CHECKOUT_R["POST /orders/{id}/checkout"]
+        HOOK_R["POST /webhook/{provider}\napp/routes/webhooks.py"]
         DOCS_R["GET /docs, GET /openapi.json\napp/routes/docs.py"]
     end
 
     DOCS_SPEC["app/docs/openapi.json\n(read by Scalar UI at /docs)"]
 
-    MTN["MTN MoMo callback"]
-    ORANGE["Orange Money callback"]
+    PROVIDER["MoMo / Orange / Campay / Smobilpay / GeniusPay callback"]
     JURY["Jury / API client"]
 
-    CSV --> RAW
-    RAW --> PIPE
-    PIPE -->|uses| ENGINE
+    SEED -->|uses| ENGINE
     ENGINE -->|init_db reads| SCHEMA
     SCHEMA -.->|defines| DB
-    PIPE --> CUST & ADDR & PROD & ORD & ITEMS
-    MTN -->|HMAC-SHA256 over raw body| HOOK_MOMO
-    ORANGE -->|HMAC-SHA256 over raw body| HOOK_ORANGE
-    HOOK_MOMO -->|provider=momo\nidempotent insert| PAY
-    HOOK_ORANGE -->|provider=orange\nidempotent insert| PAY
-    HOOK_MOMO -->|update payment_status| ORD
-    HOOK_ORANGE -->|update payment_status| ORD
-    ORD --> ORD_R
-    JURY --> ORD_R
-    JURY --> DOCS_R
+    SEED --> CUST & ADDR & PROD & ORD
+    PROVIDER -->|HMAC-SHA256 signed| HOOK_R
+    HOOK_R -->|idempotent insert| PAY
+    HOOK_R -->|update payment_status| ORD
+    JURY --> PROD_R & CUST_R & ORD_R & CHECKOUT_R & DOCS_R
     DOCS_R -->|serves| DOCS_SPEC
 ```
 
-`orders` carries a denormalized snapshot of `customer_neighborhood` and
-`delivery_status` (alongside the normalized `addresses` table) specifically
-so `idx_orders_neighborhood_status` can answer neighborhood/status lookups
-without a join — see
+Neighborhood filtering (`GET /orders?neighborhood=...`) joins `orders` to
+`addresses` rather than keeping a denormalized copy on `orders` — see
 [`docs/indexing_and_query_optimization_report.md`](docs/indexing_and_query_optimization_report.md).
 
 ## Project layout
@@ -80,30 +70,35 @@ app/
 │   │                                #   -- toggles sqlite3 / psycopg2 via DB_ENGINE env var
 │   └── settings.py                 # Config class -- app.config.from_object() source, mirrors env vars
 ├── database/
-│   ├── schema_sqlite.sql           # the 6-table schema + indexes (sqlite3)
+│   ├── schema_sqlite.sql           # the 5-table schema + indexes (sqlite3)
 │   └── schema_postgres.sql         # same schema adapted for PostgreSQL (SERIAL/VARCHAR/TIMESTAMP)
 ├── docs/
 │   └── openapi.json                # OpenAPI 3.0 spec (static file, served as-is)
 ├── routes/
+│   ├── customers.py                # POST /customers, GET/PUT/DELETE /customers/{id}
 │   ├── docs.py                     # GET /docs (Scalar UI), GET /openapi.json
-│   ├── orders.py                   # GET /orders (filter + paginate), GET /orders/{id}
-│   └── webhooks.py                 # POST /webhook/momo, POST /webhook/orange
+│   ├── orders.py                   # GET/POST /orders, GET/PUT/DELETE /orders/{id}, checkout, sync
+│   ├── products.py                 # GET/POST /products, PUT/DELETE /products/{id}
+│   └── webhooks.py                 # POST /webhook/{provider}
 └── services/
-    ├── orders.py                   # order lookup + pagination queries
-    ├── pipeline.py                 # ecommerce_orders_raw -> 6 tables ETL
-    └── webhooks.py                 # idempotent MoMo/Orange callback processing
+    ├── customers.py                # customer + address CRUD
+    ├── geniuspay.py                 # GeniusPay checkout session initiation
+    ├── orders.py                   # order CRUD, lookup, pagination, offline sync
+    ├── products.py                 # product CRUD
+    └── webhooks.py                 # idempotent multi-provider callback processing
 scripts/
-├── generate_mock_transactions.py   # generates the messy CSV + loads ecommerce_orders_raw
-└── load_structured_orders.py       # runs the ETL against data/ecommerce.db
+└── seed_cameroon_volume.py         # seeds 500 Cameroonian orders into the normalized tables
 docs/
 └── indexing_and_query_optimization_report.md
 tests/
 ├── conftest.py                     # app/client fixtures shared by every test module
+├── test_customers_routes.py
 ├── test_database.py
 ├── test_docs_routes.py
-├── test_generate_mock_transactions.py
+├── test_geniuspay.py
 ├── test_orders_routes.py
-├── test_pipeline.py
+├── test_products_routes.py
+├── test_seed_cameroon_volume.py
 ├── test_settings.py
 └── test_webhooks.py
 run.py                               # dev entry point (python run.py)
@@ -116,13 +111,10 @@ README.md
 ```bash
 pip install -r requirements.txt
 
-# 1. Generate the messy raw dataset and load it into ecommerce_orders_raw
-python scripts/generate_mock_transactions.py
+# 1. Seed 500 realistic Cameroonian orders into the normalized tables
+python scripts/seed_cameroon_volume.py
 
-# 2. Clean/normalize it into the 6 structured tables
-python scripts/load_structured_orders.py
-
-# 3. Run the API
+# 2. Run the API
 MOMO_WEBHOOK_SECRET=your-momo-secret ORANGE_WEBHOOK_SECRET=your-orange-secret python run.py
 ```
 
@@ -160,10 +152,21 @@ reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
 
 | Route | Method | Purpose |
 |---|---|---|
-| `/orders` | GET | List orders, optional `?neighborhood=` and/or `?status=` filters — served by `idx_orders_neighborhood_status` — plus `?page=` (default 1) and `?per_page=` (default 20). Response is `{"data": [...], "pagination": {"page", "per_page", "total_records", "total_pages"}}` |
-| `/orders/{id_or_ref}` | GET | Fetch a single order by internal `order_id` (e.g. `1`), sequential `external_ref` (e.g. `ECM-00001`), or a payment's transaction reference (e.g. `MTX-A1B2C3D4E5`) — whichever one the caller has on hand. 404 if none match |
-| `/orders/{order_id}/checkout` | POST | Triggers `initiate_geniuspay_payment()` (`app/services/geniuspay.py`) for the order's total and returns `{"checkout_url", "transaction_reference"}`. 404 if the order doesn't exist, 502 if the outbound GeniusPay call fails |
-| `/orders/sync` | POST | Bulk-ingests a JSON array of offline-captured orders (`app/services/orders.py::sync_offline_orders`). Idempotent on `external_ref`: replaying an identical batch after a connectivity blackout skips every already-synced order instead of duplicating it. Returns `{"synced", "skipped"}` |
+| `/orders` | GET | List orders, optional `?neighborhood=` (joins `addresses`) and/or `?status=` (served by `idx_orders_delivery_status`) filters, plus `?page=` (default 1) and `?per_page=` (default 20). Response is `{"data": [...], "pagination": {"page", "per_page", "total_records", "total_pages"}}` |
+| `/orders` | POST | Creates a single order. Accepts `customer_id` or `customer_name`+`customer_phone`+`neighborhood`(+`city`) (get-or-create), and `product_id` or `product_name`+`category`+`unit_price_fcfa` (get-or-create), plus `quantity`. `order_id` is auto-generated (`ECM-NNNNN`) if omitted |
+| `/orders/{id_or_ref}` | GET | Fetch a single order by its own `order_id` (e.g. `ECM-00001`) or a payment's transaction reference (e.g. `MTX-A1B2C3D4E5`) — whichever one the caller has on hand. 404 if none match |
+| `/orders/{order_id}` | PUT | Updates an order's `delivery_status` (`Pending`/`Shipped`/`Delivered`) and/or `payment_status` (`Pending`/`Paid`/`Failed`). 400 on an invalid value, 404 if the order doesn't exist |
+| `/orders/{order_id}` | DELETE | Deletes an order. 404 if it doesn't exist, 409 if `payments` still reference it |
+| `/orders/{order_id}/checkout` | POST | Triggers `initiate_geniuspay_payment()` (`app/services/geniuspay.py`) for `quantity * unit_price_fcfa` and returns `{"checkout_url", "transaction_reference"}`. 404 if the order doesn't exist, 502 if the outbound GeniusPay call fails |
+| `/orders/sync` | POST | Bulk-ingests a JSON array of offline-captured orders (`app/services/orders.py::sync_offline_orders`). Idempotent on `order_id`: replaying an identical batch after a connectivity blackout skips every already-synced order instead of duplicating it. Returns `{"synced", "skipped"}` |
+| `/products` | GET | Paginated product list (`?page=`, `?per_page=`) |
+| `/products` | POST | Creates a product (`name`, `category`, `unit_price_fcfa`, optional `stock_quantity`). 400 on invalid fields |
+| `/products/{id}` | PUT | Partially updates a product. 404 if unknown |
+| `/products/{id}` | DELETE | Deletes a product. 404 if unknown, 409 if referenced by an order |
+| `/customers` | POST | Creates a customer together with its first address (`full_name`, `phone_number` as `+2376XXXXXXXX`, `neighborhood`, `city`, optional `street_details`). 400 on invalid phone format, 409 on a phone already in use |
+| `/customers/{id}` | GET | Fetch a customer with its nested `addresses`. 404 if unknown |
+| `/customers/{id}` | PUT | Updates customer fields and/or its primary address's fields. 404 if unknown, 409 on a phone taken by another customer |
+| `/customers/{id}` | DELETE | Deletes a customer and its addresses. 404 if unknown, 409 if the customer has existing orders |
 | `/webhook/{provider}` | POST | Payment callback for the named provider (`momo`, `orange`, `campay`, `smobilpay`, `geniuspay`). Requires that provider's own signature header (e.g. `X-Momo-Signature`, `X-Campay-Signature`, or `X-Webhook-Signature` + `X-Webhook-Timestamp` + `X-Webhook-Event` for `geniuspay`) keyed with its own secret, resolved dynamically from `_PROVIDER_CONFIG`. Idempotent on `(provider, external_transaction_id)`; an unrecognized `provider` returns 500 |
 | `/webhook/simulate-carrier` | POST | **Dev-only** (404s unless the app runs with `debug=True`): bypasses signature verification entirely to fire a `momo`/`orange` callback straight from the Scalar UI, for demoing the payment lifecycle without hand-computing an HMAC. Never enable `debug` in production |
 | `/docs` | GET | Interactive Scalar API reference — try all endpoints above from the browser |
@@ -285,52 +288,40 @@ in the schema) catches it before any insert, exactly as proven by
 python -m pytest -v
 ```
 
-82 tests, 100% passing (`python -m pytest -v`). Every behavior above —
-including the schema, the ETL, the dual-engine connection layer, the
-multi-provider webhooks, the GeniusPay checkout/webhook lifecycle, the
-offline sync endpoint, and the paginated order lookup — was written
-test-first: a failing test proving the gap, then the minimal code to close
-it, per the project's
+102 tests, 100% passing (`python -m pytest -v`). Every behavior above —
+including the schema, the CRUD services/routes, the dual-engine connection
+layer, the multi-provider webhooks, the GeniusPay checkout/webhook
+lifecycle, the offline sync endpoint, the seeder, and the paginated order
+lookup — was written test-first: a failing test proving the gap, then the
+minimal code to close it, per the project's
 [TDD skill](.agents/skills/test-driven-development/SKILL.md).
 
 ## Cameroonian context adaptation
 
-### ETL choice: synthesizing identity the raw data doesn't have
+### Volume seeder: realistic identity, not synthetic placeholders
 
-`ecommerce_orders_raw` is a flat logistics export — one row per order, with
-a neighborhood and a product category, but **no customer name/phone and no
-product SKU**. A normalized schema needs real entities, so
-`app/services/pipeline.py::load_structured_data()` makes two explicit,
-documented calls rather than silently guessing:
+`scripts/seed_cameroon_volume.py` inserts 500 transaction logs straight into
+the normalized tables through `get_connection()`/`format_query()` — no raw
+staging table, no ETL step:
 
-- **One synthetic customer per raw order row**, deterministically derived
-  from the raw `order_id` (the only stable identity the source offers) —
-  matching the actual grain of the data instead of inventing a fake
-  dedup key.
-- **Products deduped by category**, with the master `unit_price_fcfa` taken
-  from the first valid row seen for that category; each `order_items` row
-  still keeps its own transactional price from the raw record, so historical
-  pricing isn't lost to the dedup.
-- **Neighborhood → city** is resolved from a real Douala/Yaoundé lookup
-  table (`NEIGHBORHOOD_CITY` in `pipeline.py`) — Akwa, Bonapriso,
-  Bonamoussadi, Deido and New Bell map to Douala; Bastos, Mendong, Nlongkak,
-  Biyem-Assi and Ngousso map to Yaoundé — rather than a placeholder city.
+- **Products first** (Electronics/Phones/Fashion, e.g. Tecno/Samsung/Infinix
+  phones, TVs, wax print fabric), get-or-created by name so re-running the
+  seeder never duplicates a product.
+- **500 distinct customers**, each with a real-looking Cameroonian
+  full name and a unique `+2376XXXXXXXX` mobile number.
+- **One address per customer**, in a real Douala/Yaoundé neighborhood (Akwa,
+  Bonapriso → Douala; Bastos, Mendong, Biyem-Assi → Yaoundé) — never a
+  placeholder city.
+- **One order per customer**, referencing a random product directly
+  (`orders.product_id`), with a random quantity and one of the three
+  tracking states (`Pending`/`Shipped`/`Delivered`), and a sequential
+  `order_id` (`ECM-NNNNN`) that continues from whatever the table's current
+  maximum already is.
 
-### The Biyem-Assi text-collapsing anomaly
-
-The raw generator injects casing noise (`akwa`, `AKWA`, `Akwa `) *and*, for
-hyphenated neighborhoods, a **space variant** — `Biyem-Assi` also appears as
-`Biyem Assi`. A naive `.title()` pass fixes casing but leaves `Biyem Assi`
-and `Biyem-Assi` as two different strings, which would silently split one
-neighborhood's orders across two buckets in every downstream count and in
-`idx_orders_neighborhood_status` itself.
-
-`normalize_neighborhood()` catches this by snapping any casing/spacing
-variant of a known neighborhood to one canonical spelling (see
-`_canon_key()` / `_CANONICAL_NEIGHBORHOODS` in `pipeline.py`), verified by
-`tests/test_pipeline.py::test_normalize_neighborhood_collapses_hyphen_space_variant_to_canonical_name`
-and confirmed end-to-end against the full 912-row loaded dataset: exactly
-10 distinct neighborhoods, no duplicates.
+Verified by `tests/test_seed_cameroon_volume.py`: exactly 500 rows in each
+of `customers`/`addresses`/`orders`, every phone number unique and
+`+2376`-formatted, every neighborhood mapped to its correct city, and every
+`delivery_status` one of the three valid tracking states.
 
 ### Network timeout protection: idempotent webhook
 
@@ -440,6 +431,7 @@ TDD red/green/refactor loop.
 | — | `/goal` ×2 | Two directives describing defects in `scripts/generate_mock_transactions.py` and its own database-path handling that, on inspection, did not exist in the actual file (a "duplicated block before the docstring" and a "truncated `generate_messy_dataframe()`" that was already complete; a "missing postgres branch" that `get_connection()` already handled centrally) | No code changed either time — verified against the real file/module first, reported back with the specific line numbers and function bodies proving the premise was false, declined to fabricate a fix for a non-existent bug |
 | Phase 14: Centralized settings | `/goal` | New `app/config/settings.py::Config` (env-var-backed, uppercase class attributes for Flask's `from_object`); `create_app()` takes zero arguments and loads it via `app.config.from_object("app.config.settings.Config")`; `run.py` reduced to `create_app()`; `conftest.py`/`test_webhooks.py::_build_app()` inject isolated test config directly into `app.config` post-construction instead of passing constructor kwargs | 2 new tests (`tests/test_settings.py`: defaults, env-var overrides) — 50 tests passing. `get_connection()`/`get_engine()`/`format_query()` in `app/config/database.py` deliberately still read `os.environ` directly rather than `current_app.config` -- they're also called from `scripts/` with no Flask app context, where `current_app` would raise |
 | — | `/goal` | A directive claiming this README was "truncated" and listing specific missing sections -- the same claim (and the same sections, all already present) as part of the Phase 13 request above, this time as a standalone directive | No code changed — re-verified every claimed-missing section by line number (`grep -n "^## \|^### "`), all present and complete; reported back that this repeats an already-checked false premise |
+| Phase 15: Clean CRUD architecture + Cameroonian seeder | `/goal` | Deleted the ETL demo (`scripts/generate_mock_transactions.py`, `scripts/load_structured_orders.py`, `app/services/pipeline.py`, `ecommerce_orders_raw`); dropped `order_items` and the denormalized `orders.customer_neighborhood` column, replaced by a direct `orders.product_id`/`quantity`/`unit_price_fcfa` and a join to `addresses`; renamed `idx_orders_neighborhood_status` to `idx_orders_delivery_status`; added full CRUD (`app/services/products.py`, `app/services/customers.py`, `app/routes/products.py`, `app/routes/customers.py`, plus `POST`/`PUT`/`DELETE /orders/{id}`); added `scripts/seed_cameroon_volume.py` (500 Cameroonian orders via `get_connection()`/`format_query()`) | 102 tests passing (new `test_products_routes.py`, `test_customers_routes.py`, `test_seed_cameroon_volume.py`; existing suites updated for the new schema shape) |
 
 Each `/goal` phase followed the same discipline: RED (failing test proving
 the gap) → GREEN (minimal code to close it) → REFACTOR (clean up without
@@ -473,10 +465,8 @@ Also still open from earlier phases: `schema_postgres.sql` and the
 PostgreSQL branch of `get_connection()`/`init_db()`/`get_last_row_id()` have
 never run against a live PostgreSQL server (none is available in this
 project's environment) — validated by code review and mocked unit tests
-only, not an end-to-end run. And `scripts/load_structured_orders.py::main()`
+only, not an end-to-end run. And `scripts/seed_cameroon_volume.py::main()`
 still checks for existing tables via `SELECT name FROM sqlite_master WHERE
-type='table'` — a sqlite-only system table — so this one script would need
-a `get_engine()` branch (e.g. `information_schema.tables` on PostgreSQL)
-before it could seed a Postgres instance; unlike the rest of this project's
-data layer, this file wasn't touched by the database-agnosticism phases
-(see Phase 13 in the ledger below).
+type='table'` — a sqlite-only system table — so this script would need a
+`get_engine()` branch (e.g. `information_schema.tables` on PostgreSQL)
+before it could seed a Postgres instance.

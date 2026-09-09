@@ -15,7 +15,7 @@ def test_get_connection_returns_usable_sqlite_connection():
     assert row["result"] == 1
 
 
-def test_init_db_creates_all_six_tables():
+def test_init_db_creates_all_five_tables():
     conn = get_connection(":memory:")
 
     init_db(conn)
@@ -32,7 +32,6 @@ def test_init_db_creates_all_six_tables():
         "addresses",
         "products",
         "orders",
-        "order_items",
         "payments",
     }
 
@@ -67,16 +66,33 @@ def test_init_db_creates_composite_neighborhood_index():
     assert index_columns == {"neighborhood", "city"}
 
 
-def test_orders_table_has_neighborhood_and_delivery_status_columns():
+def test_init_db_creates_orders_address_id_index():
+    """orders.address_id has no automatic index just for being a FOREIGN
+    KEY -- without one, filtering orders by their address's neighborhood
+    (a JOIN on address_id) forces a full table scan of orders instead of
+    seeking via idx_addresses_neighborhood_city then probing orders.
+    """
+    conn = get_connection(":memory:")
+
+    init_db(conn)
+
+    index_columns = [
+        row["name"]
+        for row in conn.execute("PRAGMA index_info(idx_orders_address_id)").fetchall()
+    ]
+    assert index_columns == ["address_id"]
+
+
+def test_orders_table_has_product_and_delivery_status_columns():
     conn = get_connection(":memory:")
 
     init_db(conn)
 
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(orders)").fetchall()}
-    assert {"order_id", "customer_neighborhood", "delivery_status"} <= columns
+    assert {"order_id", "product_id", "quantity", "delivery_status"} <= columns
 
 
-def test_init_db_creates_orders_neighborhood_status_index():
+def test_init_db_creates_orders_delivery_status_index():
     conn = get_connection(":memory:")
 
     init_db(conn)
@@ -84,10 +100,10 @@ def test_init_db_creates_orders_neighborhood_status_index():
     index_columns = [
         row["name"]
         for row in conn.execute(
-            "PRAGMA index_info(idx_orders_neighborhood_status)"
+            "PRAGMA index_info(idx_orders_delivery_status)"
         ).fetchall()
     ]
-    assert index_columns == ["customer_neighborhood", "delivery_status"]
+    assert index_columns == ["delivery_status"]
 
 
 def test_get_engine_defaults_to_sqlite(monkeypatch):

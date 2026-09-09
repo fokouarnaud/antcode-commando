@@ -8,10 +8,24 @@ def test_openapi_json_documents_webhook_and_order_lookup_paths(client):
         "/webhook/{provider}",
         "/orders",
         "/orders/{id_or_ref}",
+        "/orders/{order_id}",
+        "/orders/sync",
+        "/orders/{order_id}/checkout",
+        "/products",
+        "/products/{product_id}",
+        "/customers",
+        "/customers/{customer_id}",
     }
     assert "post" in spec["paths"]["/webhook/{provider}"]
     assert "get" in spec["paths"]["/orders"]
+    assert "post" in spec["paths"]["/orders"]
     assert "get" in spec["paths"]["/orders/{id_or_ref}"]
+    assert {"put", "delete"} <= set(spec["paths"]["/orders/{order_id}"])
+    assert "get" in spec["paths"]["/products"]
+    assert "post" in spec["paths"]["/products"]
+    assert {"put", "delete"} <= set(spec["paths"]["/products/{product_id}"])
+    assert "post" in spec["paths"]["/customers"]
+    assert {"get", "put", "delete"} <= set(spec["paths"]["/customers/{customer_id}"])
 
 
 def test_docs_route_serves_html_referencing_the_openapi_spec(client):

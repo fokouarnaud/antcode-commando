@@ -3,13 +3,18 @@ import math
 from flask import Blueprint, jsonify, request
 
 from app import get_db
+from app.config.database import integrity_errors
 from app.services.geniuspay import GeniusPayError, initiate_geniuspay_payment
 from app.services.orders import (
+    OrderValidationError,
+    create_order,
+    delete_order,
     get_order_by_id,
     get_order_by_transaction_reference,
     get_order_checkout_details,
     list_orders,
     sync_offline_orders,
+    update_order_tracking,
 )
 
 orders_bp = Blueprint("orders", __name__)
@@ -57,6 +62,55 @@ def order_list():
             "total_pages": math.ceil(total_records / per_page),
         },
     }), 200
+
+
+@orders_bp.route("/orders", methods=["POST"])
+def order_create():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "expected a JSON object"}), 400
+
+    try:
+        order = create_order(get_db(), payload)
+    except KeyError as exc:
+        return jsonify({"error": f"missing required field: {exc}"}), 400
+    except OrderValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(dict(order)), 201
+
+
+@orders_bp.route("/orders/<order_id>", methods=["PUT"])
+def order_update(order_id):
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        order = update_order_tracking(
+            get_db(),
+            order_id,
+            delivery_status=payload.get("delivery_status"),
+            payment_status=payload.get("payment_status"),
+        )
+    except OrderValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    if order is None:
+        return jsonify({"error": "order not found"}), 404
+    return jsonify(dict(order)), 200
+
+
+@orders_bp.route("/orders/<order_id>", methods=["DELETE"])
+def order_delete(order_id):
+    conn = get_db()
+    try:
+        deleted = delete_order(conn, order_id)
+    except integrity_errors():
+        conn.rollback()
+        return jsonify({"error": "order has associated payments and cannot be deleted"}), 409
+
+    if not deleted:
+        return jsonify({"error": "order not found"}), 404
+    return "", 204
 
 
 @orders_bp.route("/orders/sync", methods=["POST"])
