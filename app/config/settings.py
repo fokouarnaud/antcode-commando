@@ -23,6 +23,7 @@ class Config:
     ORANGE_WEBHOOK_SECRET = os.environ.get("ORANGE_WEBHOOK_SECRET", "dev-secret-change-me")
     CAMPAY_WEBHOOK_SECRET = os.environ.get("CAMPAY_WEBHOOK_SECRET", "dev-secret-change-me")
     SMOBILPAY_WEBHOOK_SECRET = os.environ.get("SMOBILPAY_WEBHOOK_SECRET", "dev-secret-change-me")
+    GENIUSPAY_WEBHOOK_SECRET = os.environ.get("GENIUSPAY_WEBHOOK_SECRET", "dev-secret-change-me")
     DEFAULT_AGGREGATOR = os.environ.get("DEFAULT_AGGREGATOR", "campay")
     GENIUSPAY_API_KEY = os.environ.get("GENIUSPAY_API_KEY", "pk_sandbox_mock")
     GENIUSPAY_API_SECRET = os.environ.get("GENIUSPAY_API_SECRET", "sk_sandbox_mock")

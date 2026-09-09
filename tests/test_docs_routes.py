@@ -8,12 +8,14 @@ def test_openapi_json_documents_webhook_and_order_lookup_paths(client):
         "/webhook/momo",
         "/webhook/orange",
         "/webhook/aggregator",
+        "/webhooks/geniuspay",
         "/orders",
         "/orders/{order_id}",
     }
     assert "post" in spec["paths"]["/webhook/momo"]
     assert "post" in spec["paths"]["/webhook/orange"]
     assert "post" in spec["paths"]["/webhook/aggregator"]
+    assert "post" in spec["paths"]["/webhooks/geniuspay"]
     assert "get" in spec["paths"]["/orders"]
     assert "get" in spec["paths"]["/orders/{order_id}"]
 

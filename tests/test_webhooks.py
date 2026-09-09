@@ -244,7 +244,8 @@ def _build_app(app, **config_overrides):
     new_app = create_app()
     for key in (
         "DATABASE_PATH", "MOMO_WEBHOOK_SECRET", "ORANGE_WEBHOOK_SECRET",
-        "CAMPAY_WEBHOOK_SECRET", "SMOBILPAY_WEBHOOK_SECRET", "DEFAULT_AGGREGATOR",
+        "CAMPAY_WEBHOOK_SECRET", "SMOBILPAY_WEBHOOK_SECRET", "GENIUSPAY_WEBHOOK_SECRET",
+        "DEFAULT_AGGREGATOR",
     ):
         new_app.config[key] = app.config[key]
     for key, value in config_overrides.items():
@@ -308,3 +309,146 @@ def test_aggregator_webhook_returns_500_for_unknown_default_aggregator(app):
     )
 
     assert response.status_code == 500
+
+
+def geniuspay_payload(order_id=1, transaction_id="GENIUSPAY-TX-0001", amount=12000):
+    return {
+        "data": {
+            "transaction_id": transaction_id,
+            "amount": amount,
+            "metadata": {"order_id": order_id},
+        },
+    }
+
+
+def sign_geniuspay(secret, timestamp, raw_body_string):
+    message = f"{timestamp}.{raw_body_string}".encode()
+    return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
+
+
+def post_geniuspay(client, secret, payload, event="payment.success", timestamp="1700000000", signature=None):
+    raw_body_string = json.dumps(payload)
+    if signature is None:
+        signature = sign_geniuspay(secret, timestamp, raw_body_string)
+    return client.post(
+        "/webhooks/geniuspay",
+        data=raw_body_string.encode(),
+        content_type="application/json",
+        headers={
+            "X-Webhook-Signature": signature,
+            "X-Webhook-Timestamp": timestamp,
+            "X-Webhook-Event": event,
+        },
+    )
+
+
+def test_geniuspay_webhook_rejects_request_with_missing_signature(client, app):
+    raw_body_string = json.dumps(geniuspay_payload())
+
+    response = client.post(
+        "/webhooks/geniuspay",
+        data=raw_body_string.encode(),
+        content_type="application/json",
+        headers={"X-Webhook-Timestamp": "1700000000", "X-Webhook-Event": "payment.success"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_geniuspay_webhook_rejects_tampered_body_even_with_valid_looking_signature(client, app):
+    """The signed message is f"{timestamp}.{raw_body}" -- proves the body,
+    not just the timestamp, is covered by the signature.
+    """
+    secret = app.config["GENIUSPAY_WEBHOOK_SECRET"]
+    timestamp = "1700000000"
+    original_body = json.dumps(geniuspay_payload(amount=12000))
+    signature = sign_geniuspay(secret, timestamp, original_body)
+    tampered_body = json.dumps(geniuspay_payload(amount=999999999))
+
+    response = client.post(
+        "/webhooks/geniuspay",
+        data=tampered_body.encode(),
+        content_type="application/json",
+        headers={
+            "X-Webhook-Signature": signature,
+            "X-Webhook-Timestamp": timestamp,
+            "X-Webhook-Event": "payment.success",
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_geniuspay_webhook_rejects_mismatched_timestamp_even_with_valid_body_signature(client, app):
+    """The timestamp is part of the signed message too -- replaying a valid
+    body+signature pair under a different X-Webhook-Timestamp must fail.
+    """
+    secret = app.config["GENIUSPAY_WEBHOOK_SECRET"]
+    payload = geniuspay_payload()
+    raw_body_string = json.dumps(payload)
+    signature = sign_geniuspay(secret, "1700000000", raw_body_string)
+
+    response = post_geniuspay(
+        client, secret, payload, timestamp="1700000999", signature=signature
+    )
+
+    assert response.status_code == 401
+
+
+def test_geniuspay_webhook_processes_payment_success_event_and_marks_order_paid(client, app):
+    response = post_geniuspay(client, app.config["GENIUSPAY_WEBHOOK_SECRET"], geniuspay_payload())
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "processed"
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    payment = conn.execute(
+        "SELECT * FROM payments WHERE external_transaction_id = 'GENIUSPAY-TX-0001'"
+    ).fetchone()
+    assert payment["provider"] == "geniuspay"
+    assert payment["amount_fcfa"] == 12000
+    assert payment["status"] == "Successful"
+    order = conn.execute("SELECT payment_status FROM orders WHERE order_id = 1").fetchone()
+    assert order["payment_status"] == "Paid"
+
+
+def test_geniuspay_webhook_does_not_mark_order_paid_for_non_success_event(client, app):
+    response = post_geniuspay(
+        client,
+        app.config["GENIUSPAY_WEBHOOK_SECRET"],
+        geniuspay_payload(transaction_id="GENIUSPAY-TX-0002"),
+        event="payment.failed",
+    )
+
+    assert response.status_code == 200
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    order = conn.execute("SELECT payment_status FROM orders WHERE order_id = 1").fetchone()
+    assert order["payment_status"] == "Failed"
+
+
+def test_geniuspay_webhook_does_not_double_process_retried_callback(client, app):
+    secret = app.config["GENIUSPAY_WEBHOOK_SECRET"]
+    payload = geniuspay_payload()
+    first = post_geniuspay(client, secret, payload)
+    second = post_geniuspay(client, secret, payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.get_json()["status"] == "already_processed"
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    count = conn.execute(
+        "SELECT COUNT(*) AS n FROM payments WHERE external_transaction_id = 'GENIUSPAY-TX-0001'"
+    ).fetchone()["n"]
+    assert count == 1
+
+
+def test_geniuspay_webhook_returns_404_for_unknown_order(client, app):
+    response = post_geniuspay(
+        client,
+        app.config["GENIUSPAY_WEBHOOK_SECRET"],
+        geniuspay_payload(order_id=999, transaction_id="GENIUSPAY-TX-UNKNOWN"),
+    )
+
+    assert response.status_code == 404

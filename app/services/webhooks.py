@@ -1,4 +1,4 @@
-"""Processes MTN MoMo / Orange Money payment callbacks.
+"""Processes MTN MoMo / Orange Money / aggregator / GeniusPay payment callbacks.
 
 Idempotency is state-gated on the (provider, external_transaction_id) pair
 (UNIQUE composite key in the schema): a callback whose provider+transaction
@@ -23,10 +23,36 @@ _STATUS_MAP = {
     "FAILED": ("Failed", "Failed"),
 }
 
+_GENIUSPAY_EVENT_STATUS = {
+    "payment.success": "SUCCESSFUL",
+    "payment.failed": "FAILED",
+}
+
+
+def _extract_fields(payload):
+    """GeniusPay nests everything under data/metadata and signals outcome
+    via the X-Webhook-Event header (mirrored into payload["event"] by the
+    route) rather than a flat status field like the other providers.
+    """
+    if payload.get("provider") == "geniuspay":
+        data = payload["data"]
+        return (
+            data["metadata"]["order_id"],
+            data["transaction_id"],
+            data["amount"],
+            _GENIUSPAY_EVENT_STATUS.get(payload.get("event"), "PENDING"),
+        )
+    return (
+        payload["order_id"],
+        payload["external_transaction_id"],
+        payload["amount_fcfa"],
+        payload["status"].upper(),
+    )
+
 
 def process_momo_callback(conn, payload):
     provider = payload.get("provider", "Unknown")
-    external_transaction_id = payload["external_transaction_id"]
+    order_id, external_transaction_id, amount_fcfa, status_raw = _extract_fields(payload)
 
     existing = conn.execute(
         format_query(
@@ -37,16 +63,13 @@ def process_momo_callback(conn, payload):
     if existing:
         return {"status": "already_processed", "payment_id": existing["payment_id"]}
 
-    order_id = payload["order_id"]
     order = conn.execute(
         format_query("SELECT order_id FROM orders WHERE order_id = ?"), (order_id,)
     ).fetchone()
     if order is None:
         raise OrderNotFoundError(order_id)
 
-    payment_status, order_payment_status = _STATUS_MAP.get(
-        payload["status"].upper(), ("Pending", "Pending")
-    )
+    payment_status, order_payment_status = _STATUS_MAP.get(status_raw, ("Pending", "Pending"))
 
     cursor = conn.execute(
         format_query(
@@ -57,7 +80,7 @@ def process_momo_callback(conn, payload):
             order_id,
             provider,
             external_transaction_id,
-            payload["amount_fcfa"],
+            amount_fcfa,
             payment_status,
         ),
     )

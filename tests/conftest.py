@@ -9,6 +9,7 @@ WEBHOOK_SECRET = "test-momo-secret"
 ORANGE_WEBHOOK_SECRET = "test-orange-secret"
 CAMPAY_WEBHOOK_SECRET = "test-campay-secret"
 SMOBILPAY_WEBHOOK_SECRET = "test-smobilpay-secret"
+GENIUSPAY_WEBHOOK_SECRET = "test-geniuspay-secret"
 DEFAULT_AGGREGATOR = "campay"
 
 os.environ["DB_ENGINE"] = "sqlite"
@@ -46,6 +47,7 @@ def app(tmp_path):
     flask_app.config["ORANGE_WEBHOOK_SECRET"] = ORANGE_WEBHOOK_SECRET
     flask_app.config["CAMPAY_WEBHOOK_SECRET"] = CAMPAY_WEBHOOK_SECRET
     flask_app.config["SMOBILPAY_WEBHOOK_SECRET"] = SMOBILPAY_WEBHOOK_SECRET
+    flask_app.config["GENIUSPAY_WEBHOOK_SECRET"] = GENIUSPAY_WEBHOOK_SECRET
     flask_app.config["DEFAULT_AGGREGATOR"] = DEFAULT_AGGREGATOR
     return flask_app
 

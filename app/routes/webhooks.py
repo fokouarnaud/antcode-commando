@@ -25,14 +25,32 @@ _PROVIDER_CONFIG = {
         "secret_key": "SMOBILPAY_WEBHOOK_SECRET",
         "signature_header": "X-Smobilpay-Signature",
     },
+    "geniuspay": {
+        "secret_key": "GENIUSPAY_WEBHOOK_SECRET",
+        "signature_header": "X-Webhook-Signature",
+        "timestamp_header": "X-Webhook-Timestamp",
+        "event_header": "X-Webhook-Event",
+    },
 }
 
 
-def _has_valid_signature(secret, raw_body, signature):
+def _has_valid_signature(secret, message, signature):
     if not signature:
         return False
-    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    expected = hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
+
+
+def _signed_message(config):
+    """Builds the exact byte string each provider signs. GeniusPay's
+    structural spec prepends f"{timestamp}." ahead of the raw body -- every
+    other provider signs the raw body alone.
+    """
+    raw_body_string = request.get_data(as_text=True)
+    if "timestamp_header" in config:
+        timestamp = request.headers.get(config["timestamp_header"], "")
+        return f"{timestamp}.{raw_body_string}".encode()
+    return raw_body_string.encode()
 
 
 def _webhook(provider):
@@ -42,13 +60,15 @@ def _webhook(provider):
 
     secret = current_app.config[config["secret_key"]]
     signature = request.headers.get(config["signature_header"], "")
-    raw_body = request.get_data()
+    message = _signed_message(config)
 
-    if not _has_valid_signature(secret, raw_body, signature):
+    if not _has_valid_signature(secret, message, signature):
         return jsonify({"error": "invalid signature"}), 401
 
     payload = request.get_json(silent=True) or {}
     payload["provider"] = provider
+    if "event_header" in config:
+        payload["event"] = request.headers.get(config["event_header"], "")
 
     conn = get_db()
     try:
@@ -67,6 +87,11 @@ def momo_webhook():
 @webhooks_bp.route("/webhook/orange", methods=["POST"])
 def orange_webhook():
     return _webhook("orange")
+
+
+@webhooks_bp.route("/webhooks/geniuspay", methods=["POST"])
+def geniuspay_webhook():
+    return _webhook("geniuspay")
 
 
 @webhooks_bp.route("/webhook/aggregator", methods=["POST"])

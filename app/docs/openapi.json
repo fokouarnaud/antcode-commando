@@ -3,7 +3,7 @@
   "info": {
     "title": "AntCode Commando - E-Commerce Logistics API",
     "version": "1.0.0",
-    "description": "Order lookups over the customer_neighborhood/delivery_status composite index, and the idempotent MTN MoMo / Orange Money payment webhook."
+    "description": "Order lookups over the customer_neighborhood/delivery_status composite index, and the idempotent MTN MoMo / Orange Money / aggregator / GeniusPay payment webhooks."
   },
   "components": {
     "securitySchemes": {
@@ -24,6 +24,12 @@
         "in": "header",
         "name": "X-Aggregator-Signature",
         "description": "Placeholder name for whichever header the active DEFAULT_AGGREGATOR actually expects (e.g. X-Campay-Signature, X-Smobilpay-Signature) -- hex-encoded HMAC-SHA256 of the raw request body, keyed with that aggregator's own secret (e.g. CAMPAY_WEBHOOK_SECRET)."
+      },
+      "geniuspaySignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Webhook-Signature",
+        "description": "Hex-encoded HMAC-SHA256 of f\"{X-Webhook-Timestamp}.{raw_request_body}\", keyed with GENIUSPAY_WEBHOOK_SECRET -- GeniusPay's structural validation spec binds both the timestamp and body into the signature, unlike the other providers which sign the raw body alone."
       }
     },
     "schemas": {
@@ -82,6 +88,28 @@
           "external_transaction_id": { "type": "string", "example": "CAMPAY-TX-0001" },
           "amount_fcfa": { "type": "integer", "example": 5000 },
           "status": { "type": "string", "enum": ["SUCCESSFUL", "FAILED"] }
+        }
+      },
+      "GeniusPayCallback": {
+        "type": "object",
+        "required": ["data"],
+        "description": "The outcome (paid vs. failed) is carried by the X-Webhook-Event header (payment.success / payment.failed), not a body field.",
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["transaction_id", "amount", "metadata"],
+            "properties": {
+              "transaction_id": { "type": "string", "example": "GENIUSPAY-TX-0001" },
+              "amount": { "type": "integer", "example": 12000 },
+              "metadata": {
+                "type": "object",
+                "required": ["order_id"],
+                "properties": {
+                  "order_id": { "type": "integer", "example": 1 }
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -205,6 +233,42 @@
           "200": { "description": "Processed, or already processed (idempotent replay)" },
           "401": { "description": "Missing, invalid, or payload-mismatched X-Orange-Signature" },
           "404": { "description": "order_id does not exist" }
+        }
+      }
+    },
+    "/webhooks/geniuspay": {
+      "post": {
+        "summary": "GeniusPay Merchant API payment callback",
+        "description": "Idempotent, keyed on (provider, external_transaction_id), same as the other webhooks. Verified against GeniusPay's structural spec: the signature covers f\"{timestamp}.{raw_body}\", not the raw body alone. order_id is read from data.metadata.order_id (set by our own initiate_geniuspay_payment() call), and the payment/order status transitions to Paid only when X-Webhook-Event is payment.success.",
+        "security": [{ "geniuspaySignature": [] }],
+        "parameters": [
+          {
+            "name": "X-Webhook-Timestamp",
+            "in": "header",
+            "required": true,
+            "description": "Unix timestamp GeniusPay signed alongside the body; part of the HMAC message.",
+            "schema": { "type": "string", "example": "1700000000" }
+          },
+          {
+            "name": "X-Webhook-Event",
+            "in": "header",
+            "required": true,
+            "description": "Event type. payment.success marks the order Paid; anything else leaves it unpaid.",
+            "schema": { "type": "string", "example": "payment.success" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/GeniusPayCallback" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Processed, or already processed (idempotent replay)" },
+          "401": { "description": "Missing, invalid, or payload/timestamp-mismatched X-Webhook-Signature" },
+          "404": { "description": "order_id (from data.metadata.order_id) does not exist" }
         }
       }
     },
