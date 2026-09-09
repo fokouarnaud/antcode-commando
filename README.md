@@ -162,9 +162,110 @@ reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
 |---|---|---|
 | `/orders` | GET | List orders, optional `?neighborhood=` and/or `?status=` filters — served by `idx_orders_neighborhood_status` — plus `?page=` (default 1) and `?per_page=` (default 20). Response is `{"data": [...], "pagination": {"page", "per_page", "total_records", "total_pages"}}` |
 | `/orders/{order_id}` | GET | Fetch a single order (404 if unknown) |
+| `/orders/{order_id}/checkout` | POST | Triggers `initiate_geniuspay_payment()` (`app/services/geniuspay.py`) for the order's total and returns `{"checkout_url", "transaction_reference"}`. 404 if the order doesn't exist, 502 if the outbound GeniusPay call fails |
+| `/orders/sync` | POST | Bulk-ingests a JSON array of offline-captured orders (`app/services/orders.py::sync_offline_orders`). Idempotent on `external_ref`: replaying an identical batch after a connectivity blackout skips every already-synced order instead of duplicating it. Returns `{"synced", "skipped"}` |
 | `/webhook/{provider}` | POST | Payment callback for the named provider (`momo`, `orange`, `campay`, `smobilpay`, `geniuspay`). Requires that provider's own signature header (e.g. `X-Momo-Signature`, `X-Campay-Signature`, or `X-Webhook-Signature` + `X-Webhook-Timestamp` + `X-Webhook-Event` for `geniuspay`) keyed with its own secret, resolved dynamically from `_PROVIDER_CONFIG`. Idempotent on `(provider, external_transaction_id)`; an unrecognized `provider` returns 500 |
+| `/webhook/simulate-carrier` | POST | **Dev-only** (404s unless the app runs with `debug=True`): bypasses signature verification entirely to fire a `momo`/`orange` callback straight from the Scalar UI, for demoing the payment lifecycle without hand-computing an HMAC. Never enable `debug` in production |
 | `/docs` | GET | Interactive Scalar API reference — try all endpoints above from the browser |
 | `/openapi.json` | GET | OpenAPI 3.0 spec backing `/docs` (`app/docs/openapi.json`) |
+
+### 🧪 Live End-to-End Testing Scenarios
+
+These three scenarios walk the full GeniusPay payment lifecycle by hand
+against a running server (`python run.py`), either from the Scalar UI at
+**http://127.0.0.1:5000/docs** or with `curl`. They exercise the exact same
+guarantees `tests/test_geniuspay.py` and `tests/test_webhooks.py` already
+assert with mocks — here you're watching them hold against the real
+routes. Replace `1` below with a real `order_id` from `GET /orders` if
+your database doesn't already have one.
+
+#### Scenario 1 — Outbound Initiation
+
+```bash
+curl -X POST http://127.0.0.1:5000/orders/1/checkout
+```
+
+Expected response:
+
+```json
+{
+  "checkout_url": "https://geniuspay.ci/pay/...",
+  "transaction_reference": "..."
+}
+```
+
+This is a *real* outbound `POST https://geniuspay.ci/api/v1/merchant/payments`
+(`app/services/geniuspay.py::initiate_geniuspay_payment`), signed with
+`GENIUSPAY_API_KEY`/`GENIUSPAY_API_SECRET` from `.env`. Without live
+GeniusPay sandbox credentials there's nothing real to reach, so expect
+`502 {"error": "payment initiation failed"}` instead — that's
+`GeniusPayError` being caught cleanly, not a crash. Swap in real sandbox
+keys to see an actual `checkout_url` come back.
+
+#### Scenario 2 — Async Webhook Ingestion
+
+**Option A — GeniusPay's real signature scheme.** GeniusPay signs
+`f"{timestamp}.{raw_body}"`, so compute the signature before sending:
+
+```bash
+python3 - <<'PY'
+import hashlib, hmac, json, time
+
+secret = "dev-secret-change-me"  # your GENIUSPAY_WEBHOOK_SECRET
+timestamp = str(int(time.time()))
+body = json.dumps({"data": {"transaction_id": "GPAY-DEMO-01", "amount": 12000, "metadata": {"order_id": 1}}})
+signature = hmac.new(secret.encode(), f"{timestamp}.{body}".encode(), hashlib.sha256).hexdigest()
+print(f'curl -X POST http://127.0.0.1:5000/webhook/geniuspay \\\n  -H "X-Webhook-Signature: {signature}" \\\n  -H "X-Webhook-Timestamp: {timestamp}" \\\n  -H "X-Webhook-Event: payment.success" \\\n  -H "Content-Type: application/json" \\\n  -d \'{body}\'')
+PY
+```
+
+Run the `curl` command it prints.
+
+**Option B — the dev-only simulation route** (`momo`/`orange`, no
+signature math required; only answers when the app runs with
+`debug=True`, e.g. `python run.py`):
+
+```bash
+curl -X POST http://127.0.0.1:5000/webhook/simulate-carrier \
+  -H "Content-Type: application/json" \
+  -d '{"provider": "momo", "order_id": 1, "amount": 12000, "phone": "+237690000001", "external_transaction_id": "SIM-DEMO-01"}'
+```
+
+Either way, expected response:
+
+```json
+{"status": "processed", "payment_id": 1}
+```
+
+Confirm the order flipped to `Paid`:
+
+```bash
+curl http://127.0.0.1:5000/orders/1
+```
+
+#### Scenario 3 — Double-Entry Replay Attack Safeguard
+
+Resend the *exact same* request from Scenario 2 (identical
+`external_transaction_id`) a second time:
+
+```bash
+curl -X POST http://127.0.0.1:5000/webhook/simulate-carrier \
+  -H "Content-Type: application/json" \
+  -d '{"provider": "momo", "order_id": 1, "amount": 12000, "phone": "+237690000001", "external_transaction_id": "SIM-DEMO-01"}'
+```
+
+Expected response — still `200`, but no new row written:
+
+```json
+{"status": "already_processed", "payment_id": 1}
+```
+
+`SELECT COUNT(*) FROM payments WHERE external_transaction_id =
+'SIM-DEMO-01'` stays at `1` no matter how many times this is replayed —
+the pre-flight lookup on `(provider, external_transaction_id)` (`UNIQUE`
+in the schema) catches it before any insert, exactly as proven by
+`test_momo_webhook_does_not_double_process_retried_callback` and
+`test_simulate_carrier_webhook_is_idempotent_on_replay_when_debug_enabled`.
 
 ## Testing
 
@@ -172,11 +273,12 @@ reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
 python -m pytest -v
 ```
 
-50 tests, 100% passing (`python -m pytest -v`). Every behavior above —
+78 tests, 100% passing (`python -m pytest -v`). Every behavior above —
 including the schema, the ETL, the dual-engine connection layer, the
-multi-provider/aggregator webhooks, and the paginated order lookup — was
-written test-first: a failing test proving the gap, then the minimal code
-to close it, per the project's
+multi-provider webhooks, the GeniusPay checkout/webhook lifecycle, the
+offline sync endpoint, and the paginated order lookup — was written
+test-first: a failing test proving the gap, then the minimal code to close
+it, per the project's
 [TDD skill](.agents/skills/test-driven-development/SKILL.md).
 
 ## Cameroonian context adaptation

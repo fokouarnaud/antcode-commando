@@ -89,3 +89,38 @@ def provider_webhook(provider):
     _PROVIDER_CONFIG -- no new route or view function.
     """
     return _webhook(provider)
+
+
+@webhooks_bp.route("/webhook/simulate-carrier", methods=["POST"])
+def simulate_carrier_webhook():
+    """DEV-ONLY convenience route: skips HMAC signature verification
+    entirely so a momo/orange callback can be fired from the Scalar UI
+    (/docs) without hand-computing a raw-body signature -- every request
+    here is treated as a successful transaction. Gated on Flask's debug
+    flag (404s unless the app runs with debug=True, e.g. `python run.py`),
+    so a production deployment that doesn't opt into debug mode never
+    exposes it. Never enable app.debug in production.
+    """
+    if not current_app.debug:
+        return jsonify({"error": "not found"}), 404
+
+    body = request.get_json(silent=True) or {}
+    provider = body.get("provider")
+    if provider not in ("momo", "orange"):
+        return jsonify({"error": "provider must be 'momo' or 'orange'"}), 400
+
+    payload = {
+        "provider": provider,
+        "order_id": body.get("order_id"),
+        "external_transaction_id": body.get("external_transaction_id"),
+        "amount_fcfa": body.get("amount"),
+        "status": "SUCCESSFUL",
+    }
+
+    conn = get_db()
+    try:
+        result = process_momo_callback(conn, payload)
+    except OrderNotFoundError:
+        return jsonify({"error": "order not found"}), 404
+
+    return jsonify(result), 200

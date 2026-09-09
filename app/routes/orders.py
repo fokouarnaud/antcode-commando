@@ -67,7 +67,7 @@ def order_checkout(order_id):
         return jsonify({"error": "order not found"}), 404
 
     try:
-        checkout_url = initiate_geniuspay_payment(
+        result = initiate_geniuspay_payment(
             details["order_id"],
             details["amount_fcfa"],
             customer_phone=details["customer_phone"],
@@ -76,4 +76,4 @@ def order_checkout(order_id):
     except GeniusPayError:
         return jsonify({"error": "payment initiation failed"}), 502
 
-    return jsonify({"checkout_url": checkout_url}), 200
+    return jsonify(result), 200

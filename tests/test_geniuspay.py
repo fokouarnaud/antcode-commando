@@ -17,17 +17,23 @@ def app_context():
 
 
 @patch("requests.post")
-def test_initiate_geniuspay_payment_returns_checkout_url_on_success(mock_post, app_context):
+def test_initiate_geniuspay_payment_returns_checkout_url_and_reference_on_success(mock_post, app_context):
     mock_post.return_value = Mock(
         status_code=201,
-        json=Mock(return_value={"checkout_url": "https://geniuspay.ci/pay/abc123"}),
+        json=Mock(return_value={
+            "checkout_url": "https://geniuspay.ci/pay/abc123",
+            "reference": "GPAY-REF-001",
+        }),
     )
 
-    checkout_url = initiate_geniuspay_payment(
+    result = initiate_geniuspay_payment(
         42, 15000, customer_phone="+237690000001", customer_name="Amina Njoya"
     )
 
-    assert checkout_url == "https://geniuspay.ci/pay/abc123"
+    assert result == {
+        "checkout_url": "https://geniuspay.ci/pay/abc123",
+        "transaction_reference": "GPAY-REF-001",
+    }
     mock_post.assert_called_once()
     args, kwargs = mock_post.call_args
     assert args[0] == GENIUSPAY_ENDPOINT

@@ -63,13 +63,19 @@ def test_list_orders_paginates_to_second_page(client):
 
 
 @patch("app.routes.orders.initiate_geniuspay_payment")
-def test_checkout_returns_checkout_url_on_success(mock_initiate, client):
-    mock_initiate.return_value = "https://geniuspay.ci/pay/abc123"
+def test_checkout_returns_checkout_url_and_transaction_reference_on_success(mock_initiate, client):
+    mock_initiate.return_value = {
+        "checkout_url": "https://geniuspay.ci/pay/abc123",
+        "transaction_reference": "GPAY-REF-001",
+    }
 
     response = client.post("/orders/1/checkout")
 
     assert response.status_code == 200
-    assert response.get_json() == {"checkout_url": "https://geniuspay.ci/pay/abc123"}
+    assert response.get_json() == {
+        "checkout_url": "https://geniuspay.ci/pay/abc123",
+        "transaction_reference": "GPAY-REF-001",
+    }
     mock_initiate.assert_called_once_with(
         1, 0, customer_phone="+237690000001", customer_name="Amina Njoya"
     )

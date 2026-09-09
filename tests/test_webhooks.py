@@ -444,3 +444,134 @@ def test_geniuspay_webhook_returns_404_for_unknown_order(client, app):
     )
 
     assert response.status_code == 404
+
+
+def test_simulate_carrier_webhook_404s_when_debug_disabled(client):
+    """The dev-only simulation route must not be reachable unless the app
+    was explicitly started with debug=True -- proves the safety gate.
+    """
+    response = client.post(
+        "/webhook/simulate-carrier",
+        json={
+            "provider": "momo",
+            "order_id": 1,
+            "external_transaction_id": "SIM-TX-00",
+            "amount": 5000,
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_simulate_carrier_webhook_processes_momo_callback_when_debug_enabled(app):
+    app.config["DEBUG"] = True
+    client = app.test_client()
+
+    response = client.post(
+        "/webhook/simulate-carrier",
+        json={
+            "provider": "momo",
+            "order_id": 1,
+            "external_transaction_id": "SIM-TX-01",
+            "amount": 5000,
+            "phone": "+237690000009",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "processed"
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    payment = conn.execute(
+        "SELECT * FROM payments WHERE external_transaction_id = 'SIM-TX-01'"
+    ).fetchone()
+    assert payment["provider"] == "momo"
+    assert payment["status"] == "Successful"
+    order = conn.execute("SELECT payment_status FROM orders WHERE order_id = 1").fetchone()
+    assert order["payment_status"] == "Paid"
+
+
+def test_simulate_carrier_webhook_processes_orange_callback_when_debug_enabled(app):
+    app.config["DEBUG"] = True
+    client = app.test_client()
+
+    response = client.post(
+        "/webhook/simulate-carrier",
+        json={
+            "provider": "orange",
+            "order_id": 2,
+            "external_transaction_id": "SIM-TX-02",
+            "amount": 8000,
+        },
+    )
+
+    assert response.status_code == 200
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    payment = conn.execute(
+        "SELECT * FROM payments WHERE external_transaction_id = 'SIM-TX-02'"
+    ).fetchone()
+    assert payment["provider"] == "orange"
+
+
+def test_simulate_carrier_webhook_rejects_unsupported_provider_when_debug_enabled(app):
+    app.config["DEBUG"] = True
+    client = app.test_client()
+
+    response = client.post(
+        "/webhook/simulate-carrier",
+        json={
+            "provider": "geniuspay",
+            "order_id": 1,
+            "external_transaction_id": "SIM-TX-BAD",
+            "amount": 1000,
+        },
+    )
+
+    assert response.status_code == 400
+
+
+def test_simulate_carrier_webhook_returns_404_for_unknown_order_when_debug_enabled(app):
+    app.config["DEBUG"] = True
+    client = app.test_client()
+
+    response = client.post(
+        "/webhook/simulate-carrier",
+        json={
+            "provider": "momo",
+            "order_id": 999,
+            "external_transaction_id": "SIM-TX-03",
+            "amount": 1000,
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_simulate_carrier_webhook_is_idempotent_on_replay_when_debug_enabled(app):
+    """Reproduces the double-entry replay scenario documented in the
+    README: submitting the identical transaction ID a second time must
+    return already_processed and leave exactly one payment row behind.
+    """
+    app.config["DEBUG"] = True
+    client = app.test_client()
+    body = {
+        "provider": "momo",
+        "order_id": 1,
+        "external_transaction_id": "SIM-TX-04",
+        "amount": 3000,
+    }
+
+    first = client.post("/webhook/simulate-carrier", json=body)
+    second = client.post("/webhook/simulate-carrier", json=body)
+
+    assert first.status_code == 200
+    assert first.get_json()["status"] == "processed"
+    assert second.status_code == 200
+    assert second.get_json()["status"] == "already_processed"
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    count = conn.execute(
+        "SELECT COUNT(*) AS n FROM payments WHERE external_transaction_id = 'SIM-TX-04'"
+    ).fetchone()["n"]
+    assert count == 1
