@@ -39,6 +39,15 @@
           "external_ref": { "type": "string", "example": "ECM-00001" }
         }
       },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "page": { "type": "integer", "example": 1 },
+          "per_page": { "type": "integer", "example": 20 },
+          "total_records": { "type": "integer", "example": 2 },
+          "total_pages": { "type": "integer", "example": 1 }
+        }
+      },
       "MomoCallback": {
         "type": "object",
         "required": ["order_id", "external_transaction_id", "amount_fcfa", "status"],
@@ -80,16 +89,38 @@
             "required": false,
             "schema": { "type": "string" },
             "example": "Delayed"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-indexed page number. Defaults to 1; clamped to 1 if lower or non-numeric.",
+            "schema": { "type": "integer", "default": 1 },
+            "example": 1
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "description": "Rows per page. Defaults to 20; clamped to 1 if lower or non-numeric.",
+            "schema": { "type": "integer", "default": 20 },
+            "example": 20
           }
         ],
         "responses": {
           "200": {
-            "description": "Matching orders",
+            "description": "Matching orders, paginated",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": { "$ref": "#/components/schemas/Order" }
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Order" }
+                    },
+                    "pagination": { "$ref": "#/components/schemas/Pagination" }
+                  }
                 }
               }
             }

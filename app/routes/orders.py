@@ -1,3 +1,5 @@
+import math
+
 from flask import Blueprint, jsonify, request
 
 from app import get_db
@@ -16,9 +18,23 @@ def order_detail(order_id):
 
 @orders_bp.route("/orders", methods=["GET"])
 def order_list():
-    orders = list_orders(
+    page = max(request.args.get("page", default=1, type=int) or 1, 1)
+    per_page = max(request.args.get("per_page", default=20, type=int) or 20, 1)
+
+    orders, total_records = list_orders(
         get_db(),
         neighborhood=request.args.get("neighborhood"),
         status=request.args.get("status"),
+        page=page,
+        per_page=per_page,
     )
-    return jsonify([dict(order) for order in orders]), 200
+
+    return jsonify({
+        "data": [dict(order) for order in orders],
+        "pagination": {
+            "page": page,
+            "per_page": per_page,
+            "total_records": total_records,
+            "total_pages": math.ceil(total_records / per_page),
+        },
+    }), 200
