@@ -132,22 +132,26 @@ instead — `app/config/database.py` picks the matching schema file from
 `app/database/` and swaps `?` placeholders for `%s` via `format_query()`
 automatically.
 
-### Running with an aggregator (Campay, Smobilpay, ...)
+### Running with any provider (MoMo, Orange, Campay, Smobilpay, GeniusPay)
 
-`POST /webhook/aggregator` is a single generic route that verifies against
-whichever provider `DEFAULT_AGGREGATOR` names, using that provider's own
-secret and signature header from `_PROVIDER_CONFIG`
-(`app/routes/webhooks.py`) — adding a new aggregator later is a config-map
-entry, not a new route. It defaults to `campay` if unset:
+`POST /webhook/{provider}` is a single dynamic route: `_webhook(provider)`
+(`app/routes/webhooks.py`) resolves that provider's own secret and
+signature header straight from `_PROVIDER_CONFIG`, keyed on the `provider`
+URL segment. Adding a new provider is a config-map entry, not a new route.
 
 ```bash
-DEFAULT_AGGREGATOR=campay CAMPAY_WEBHOOK_SECRET=secret python run.py
+CAMPAY_WEBHOOK_SECRET=secret python run.py
+# then POST to /webhook/campay, signed with X-Campay-Signature
 ```
 
-Swap to Smobilpay the same way: `DEFAULT_AGGREGATOR=smobilpay
-SMOBILPAY_WEBHOOK_SECRET=secret python run.py`. `momo` and `orange` are not
-selectable through `DEFAULT_AGGREGATOR` — they keep their own dedicated
-`/webhook/momo` and `/webhook/orange` routes regardless of this setting.
+Every provider works the same way — swap the URL segment and its matching
+secret env var: `/webhook/momo` + `MOMO_WEBHOOK_SECRET`, `/webhook/orange` +
+`ORANGE_WEBHOOK_SECRET`, `/webhook/smobilpay` + `SMOBILPAY_WEBHOOK_SECRET`,
+or `/webhook/geniuspay` + `GENIUSPAY_WEBHOOK_SECRET` (which additionally
+requires `X-Webhook-Timestamp` and `X-Webhook-Event` headers, since
+GeniusPay signs `f"{timestamp}.{raw_body}"` rather than the raw body
+alone). A `provider` segment with no entry in `_PROVIDER_CONFIG` returns
+500.
 
 Then open **http://127.0.0.1:5000/docs** for the interactive Scalar API
 reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
@@ -158,9 +162,7 @@ reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
 |---|---|---|
 | `/orders` | GET | List orders, optional `?neighborhood=` and/or `?status=` filters — served by `idx_orders_neighborhood_status` — plus `?page=` (default 1) and `?per_page=` (default 20). Response is `{"data": [...], "pagination": {"page", "per_page", "total_records", "total_pages"}}` |
 | `/orders/{order_id}` | GET | Fetch a single order (404 if unknown) |
-| `/webhook/momo` | POST | MTN MoMo payment callback. Requires `X-Momo-Signature`: hex HMAC-SHA256 of the raw body, keyed with `MOMO_WEBHOOK_SECRET`. Idempotent on `(provider, external_transaction_id)` |
-| `/webhook/orange` | POST | Orange Money payment callback. Requires `X-Orange-Signature`: hex HMAC-SHA256 of the raw body, keyed with `ORANGE_WEBHOOK_SECRET`. Idempotent on `(provider, external_transaction_id)` |
-| `/webhook/aggregator` | POST | Payment callback for whichever aggregator `DEFAULT_AGGREGATOR` names (`campay` by default; `smobilpay` also wired). Requires that aggregator's own signature header (e.g. `X-Campay-Signature`) keyed with its own secret (e.g. `CAMPAY_WEBHOOK_SECRET`), from `_PROVIDER_CONFIG`. Same idempotency guarantee as the two routes above |
+| `/webhook/{provider}` | POST | Payment callback for the named provider (`momo`, `orange`, `campay`, `smobilpay`, `geniuspay`). Requires that provider's own signature header (e.g. `X-Momo-Signature`, `X-Campay-Signature`, or `X-Webhook-Signature` + `X-Webhook-Timestamp` + `X-Webhook-Event` for `geniuspay`) keyed with its own secret, resolved dynamically from `_PROVIDER_CONFIG`. Idempotent on `(provider, external_transaction_id)`; an unrecognized `provider` returns 500 |
 | `/docs` | GET | Interactive Scalar API reference — try all endpoints above from the browser |
 | `/openapi.json` | GET | OpenAPI 3.0 spec backing `/docs` (`app/docs/openapi.json`) |
 

@@ -1,7 +1,7 @@
 """Initiates real checkout sessions against the GeniusPay Merchant API.
 
 `order_id` is threaded into the request's `metadata` block so the
-/webhook/aggregator callback (app/routes/webhooks.py) can recover which
+/webhook/geniuspay callback (app/routes/webhooks.py) can recover which
 local order a GeniusPay payment notification belongs to.
 """
 
