@@ -130,6 +130,23 @@ instead — `app/config/database.py` picks the matching schema file from
 `app/database/` and swaps `?` placeholders for `%s` via `format_query()`
 automatically.
 
+### Running with an aggregator (Campay, Smobilpay, ...)
+
+`POST /webhook/aggregator` is a single generic route that verifies against
+whichever provider `DEFAULT_AGGREGATOR` names, using that provider's own
+secret and signature header from `_PROVIDER_CONFIG`
+(`app/routes/webhooks.py`) — adding a new aggregator later is a config-map
+entry, not a new route. It defaults to `campay` if unset:
+
+```bash
+DEFAULT_AGGREGATOR=campay CAMPAY_WEBHOOK_SECRET=secret python run.py
+```
+
+Swap to Smobilpay the same way: `DEFAULT_AGGREGATOR=smobilpay
+SMOBILPAY_WEBHOOK_SECRET=secret python run.py`. `momo` and `orange` are not
+selectable through `DEFAULT_AGGREGATOR` — they keep their own dedicated
+`/webhook/momo` and `/webhook/orange` routes regardless of this setting.
+
 Then open **http://127.0.0.1:5000/docs** for the interactive Scalar API
 reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
 
@@ -141,6 +158,7 @@ reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
 | `/orders/{order_id}` | GET | Fetch a single order (404 if unknown) |
 | `/webhook/momo` | POST | MTN MoMo payment callback. Requires `X-Momo-Signature`: hex HMAC-SHA256 of the raw body, keyed with `MOMO_WEBHOOK_SECRET`. Idempotent on `(provider, external_transaction_id)` |
 | `/webhook/orange` | POST | Orange Money payment callback. Requires `X-Orange-Signature`: hex HMAC-SHA256 of the raw body, keyed with `ORANGE_WEBHOOK_SECRET`. Idempotent on `(provider, external_transaction_id)` |
+| `/webhook/aggregator` | POST | Payment callback for whichever aggregator `DEFAULT_AGGREGATOR` names (`campay` by default; `smobilpay` also wired). Requires that aggregator's own signature header (e.g. `X-Campay-Signature`) keyed with its own secret (e.g. `CAMPAY_WEBHOOK_SECRET`), from `_PROVIDER_CONFIG`. Same idempotency guarantee as the two routes above |
 | `/docs` | GET | Interactive Scalar API reference — try all endpoints above from the browser |
 | `/openapi.json` | GET | OpenAPI 3.0 spec backing `/docs` (`app/docs/openapi.json`) |
 
@@ -150,11 +168,11 @@ reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
 python -m pytest -v
 ```
 
-44 tests, 100% passing (`python -m pytest -v`). Every behavior above —
+47 tests, 100% passing (`python -m pytest -v`). Every behavior above —
 including the schema, the ETL, the dual-engine connection layer, the
-dual-provider webhooks, and the paginated order lookup — was written
-test-first: a failing test proving the gap, then the minimal code to close
-it, per the project's
+multi-provider/aggregator webhooks, and the paginated order lookup — was
+written test-first: a failing test proving the gap, then the minimal code
+to close it, per the project's
 [TDD skill](.agents/skills/test-driven-development/SKILL.md).
 
 ## Cameroonian context adaptation
@@ -296,7 +314,10 @@ TDD red/green/refactor loop.
 | Phase 8: Database agnosticism II | `/goal` | Add `get_last_row_id()` (sqlite `cursor.lastrowid` vs. postgres `currval(pg_get_serial_sequence(...))`); remove `cursor.lastrowid` from `pipeline.py`/`webhooks.py`; wire `format_query()` into every `conn.execute()` in `pipeline.py`, `webhooks.py`, `orders.py` | 39 tests passing; committed via `/run` as `af8a86e`. Flagged as still incomplete for real Postgres use: `schema_postgres.sql` never ran against a live server (none available in this environment) |
 | — | Plain prompt | Explain (not implement) how the HMAC layer could extend to a second provider (Orange Money) via URL-based routing | No code changed — design discussion, formalized into Phase 9 below |
 | Phase 9: Multi-provider webhooks | `/goal` | Split `/webhook/momo` into `/webhook/momo` + `/webhook/orange` behind a shared `_webhook(provider)` helper and a provider config map; change the idempotency key from `external_transaction_id` alone to `UNIQUE(provider, external_transaction_id)` in both schema files | 4 new tests (Orange tampered/valid, cross-provider secret rejection, same-transaction-id-different-provider independence) — 43 tests passing; committed via `/run` as `957ae90` |
-| Phase 10: Orders pagination | `/goal` | Add `page`/`per_page` query params to `GET /orders`, `LIMIT ?/OFFSET ?` through `format_query()`, wrap the response in a `{data, pagination}` envelope, update `openapi.json` | Breaking response-shape change to `GET /orders` (existing tests updated to match); 1 new pagination-slice test — 44 tests passing; **not yet committed** as of this README update |
+| Phase 10: Orders pagination | `/goal` | Add `page`/`per_page` query params to `GET /orders`, `LIMIT ?/OFFSET ?` through `format_query()`, wrap the response in a `{data, pagination}` envelope, update `openapi.json` | Breaking response-shape change to `GET /orders` (existing tests updated to match); 1 new pagination-slice test — 44 tests passing; committed via `/run` bundled with Phase 11's README update as `3f0f16c` |
+| Phase 11: README overhaul | `/goal` | First full rewrite of this README: architecture diagram, project layout, AI Prompt Ledger (this table), Cameroonian-context pagination/dual-operator sections, roadmap | This document, largely as it now reads — committed as `3f0f16c` (bundled with Phase 10's still-uncommitted code, flagged to the user at the time) |
+| — | `/goal` ×2 | Fix a real Mermaid syntax bug this ledger's own diagram introduced (`provider="momo"` — double quotes inside a `\|...\|` edge label break GitHub's renderer) actually on lines 57-58, not the line number first guessed; then reformat the project-layout tree with box-drawing characters | `0d9ebc3`, `fc89f34` |
+| Phase 12: Aggregator toggle layer | `/goal` | Generic `POST /webhook/aggregator` routing to whichever provider `DEFAULT_AGGREGATOR` names, reusing the existing `_webhook(provider)`/`_PROVIDER_CONFIG` machinery from Phase 9; add `campay`/`smobilpay` config entries; guard against an unconfigured `DEFAULT_AGGREGATOR` value (500, not an unhandled exception) | 3 new tests (default-aggregator secret verification, secret swap on aggregator change, unknown-aggregator 500) — 47 tests passing |
 
 Each `/goal` phase followed the same discipline: RED (failing test proving
 the gap) → GREEN (minimal code to close it) → REFACTOR (clean up without

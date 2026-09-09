@@ -7,6 +7,9 @@ from app.config.database import get_connection, init_db
 
 WEBHOOK_SECRET = "test-momo-secret"
 ORANGE_WEBHOOK_SECRET = "test-orange-secret"
+CAMPAY_WEBHOOK_SECRET = "test-campay-secret"
+SMOBILPAY_WEBHOOK_SECRET = "test-smobilpay-secret"
+DEFAULT_AGGREGATOR = "campay"
 
 os.environ["DB_ENGINE"] = "sqlite"
 
@@ -38,6 +41,9 @@ def app(tmp_path):
         db_path=db_path,
         webhook_secret=WEBHOOK_SECRET,
         orange_webhook_secret=ORANGE_WEBHOOK_SECRET,
+        campay_webhook_secret=CAMPAY_WEBHOOK_SECRET,
+        smobilpay_webhook_secret=SMOBILPAY_WEBHOOK_SECRET,
+        default_aggregator=DEFAULT_AGGREGATOR,
     )
 
 

@@ -17,6 +17,14 @@ _PROVIDER_CONFIG = {
         "secret_key": "ORANGE_WEBHOOK_SECRET",
         "signature_header": "X-Orange-Signature",
     },
+    "campay": {
+        "secret_key": "CAMPAY_WEBHOOK_SECRET",
+        "signature_header": "X-Campay-Signature",
+    },
+    "smobilpay": {
+        "secret_key": "SMOBILPAY_WEBHOOK_SECRET",
+        "signature_header": "X-Smobilpay-Signature",
+    },
 }
 
 
@@ -28,7 +36,10 @@ def _has_valid_signature(secret, raw_body, signature):
 
 
 def _webhook(provider):
-    config = _PROVIDER_CONFIG[provider]
+    config = _PROVIDER_CONFIG.get(provider)
+    if config is None:
+        return jsonify({"error": f"unknown aggregator: {provider}"}), 500
+
     secret = current_app.config[config["secret_key"]]
     signature = request.headers.get(config["signature_header"], "")
     raw_body = request.get_data()
@@ -56,3 +67,12 @@ def momo_webhook():
 @webhooks_bp.route("/webhook/orange", methods=["POST"])
 def orange_webhook():
     return _webhook("orange")
+
+
+@webhooks_bp.route("/webhook/aggregator", methods=["POST"])
+def aggregator_webhook():
+    """Routes to whichever aggregator (Campay, Smobilpay, ...) is configured
+    as DEFAULT_AGGREGATOR, so adding a new aggregator only means adding an
+    entry to _PROVIDER_CONFIG -- no new route or view function.
+    """
+    return _webhook(current_app.config["DEFAULT_AGGREGATOR"])

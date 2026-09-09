@@ -18,6 +18,12 @@
         "in": "header",
         "name": "X-Orange-Signature",
         "description": "Hex-encoded HMAC-SHA256 of the raw request body, keyed with the shared ORANGE_WEBHOOK_SECRET. Verifies both sender authenticity and payload integrity (a tampered body invalidates the signature)."
+      },
+      "aggregatorSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Aggregator-Signature",
+        "description": "Placeholder name for whichever header the active DEFAULT_AGGREGATOR actually expects (e.g. X-Campay-Signature, X-Smobilpay-Signature) -- hex-encoded HMAC-SHA256 of the raw request body, keyed with that aggregator's own secret (e.g. CAMPAY_WEBHOOK_SECRET)."
       }
     },
     "schemas": {
@@ -65,6 +71,16 @@
           "order_id": { "type": "integer", "example": 2 },
           "external_transaction_id": { "type": "string", "example": "ORANGE-TX-0001" },
           "amount_fcfa": { "type": "integer", "example": 8000 },
+          "status": { "type": "string", "enum": ["SUCCESSFUL", "FAILED"] }
+        }
+      },
+      "AggregatorCallback": {
+        "type": "object",
+        "required": ["order_id", "external_transaction_id", "amount_fcfa", "status"],
+        "properties": {
+          "order_id": { "type": "integer", "example": 1 },
+          "external_transaction_id": { "type": "string", "example": "CAMPAY-TX-0001" },
+          "amount_fcfa": { "type": "integer", "example": 5000 },
           "status": { "type": "string", "enum": ["SUCCESSFUL", "FAILED"] }
         }
       }
@@ -189,6 +205,27 @@
           "200": { "description": "Processed, or already processed (idempotent replay)" },
           "401": { "description": "Missing, invalid, or payload-mismatched X-Orange-Signature" },
           "404": { "description": "order_id does not exist" }
+        }
+      }
+    },
+    "/webhook/aggregator": {
+      "post": {
+        "summary": "Payment callback for the active aggregator (DEFAULT_AGGREGATOR)",
+        "description": "Generic aggregator endpoint: routes to whichever provider DEFAULT_AGGREGATOR names (e.g. campay, smobilpay), verified with that provider's own secret and signature header from _PROVIDER_CONFIG (app/routes/webhooks.py). Same idempotency guarantee as /webhook/momo and /webhook/orange, keyed on (provider, external_transaction_id). Adding a new aggregator only means adding an entry to _PROVIDER_CONFIG -- not a new route.",
+        "security": [{ "aggregatorSignature": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AggregatorCallback" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Processed, or already processed (idempotent replay)" },
+          "401": { "description": "Missing, invalid, or payload-mismatched signature for the active aggregator" },
+          "404": { "description": "order_id does not exist" },
+          "500": { "description": "DEFAULT_AGGREGATOR names a provider with no entry in _PROVIDER_CONFIG (misconfiguration)" }
         }
       }
     }

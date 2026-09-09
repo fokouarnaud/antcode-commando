@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 
+from app import create_app
 from app.config.database import get_connection
 
 
@@ -209,3 +210,101 @@ def test_momo_and_orange_callbacks_reusing_the_same_transaction_id_are_independe
         (shared_id,),
     ).fetchone()["n"]
     assert count == 2
+
+
+def campay_payload(**overrides):
+    payload = {
+        "order_id": 1,
+        "external_transaction_id": "CAMPAY-TX-0001",
+        "amount_fcfa": 5000,
+        "status": "SUCCESSFUL",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def post_aggregator(client, secret, payload, header, signature=None):
+    raw_body = json.dumps(payload).encode()
+    if signature is None:
+        signature = sign(secret, raw_body)
+    return client.post(
+        "/webhook/aggregator",
+        data=raw_body,
+        content_type="application/json",
+        headers={header: signature},
+    )
+
+
+def _build_app(app, **overrides):
+    """Builds a second app instance from the test app's own secrets, so a
+    test can flip DEFAULT_AGGREGATOR without touching the shared `app`
+    fixture other tests in this module rely on.
+    """
+    kwargs = dict(
+        db_path=app.config["DATABASE_PATH"],
+        webhook_secret=app.config["MOMO_WEBHOOK_SECRET"],
+        orange_webhook_secret=app.config["ORANGE_WEBHOOK_SECRET"],
+        campay_webhook_secret=app.config["CAMPAY_WEBHOOK_SECRET"],
+        smobilpay_webhook_secret=app.config["SMOBILPAY_WEBHOOK_SECRET"],
+        default_aggregator=app.config["DEFAULT_AGGREGATOR"],
+    )
+    kwargs.update(overrides)
+    return create_app(**kwargs)
+
+
+def test_aggregator_webhook_verifies_with_the_default_aggregators_secret(client, app):
+    """The test app fixture's DEFAULT_AGGREGATOR is 'campay' -- /webhook/aggregator
+    must accept a signature computed with CAMPAY_WEBHOOK_SECRET over
+    X-Campay-Signature, proving it dynamically resolved campay's config
+    rather than being hardcoded to one provider.
+    """
+    response = post_aggregator(
+        client,
+        app.config["CAMPAY_WEBHOOK_SECRET"],
+        campay_payload(),
+        "X-Campay-Signature",
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "processed"
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    payment = conn.execute(
+        "SELECT * FROM payments WHERE external_transaction_id = 'CAMPAY-TX-0001'"
+    ).fetchone()
+    assert payment["provider"] == "campay"
+
+
+def test_aggregator_webhook_switches_secret_when_default_aggregator_changes(app):
+    """Swapping DEFAULT_AGGREGATOR to 'smobilpay' must make /webhook/aggregator
+    verify against SMOBILPAY_WEBHOOK_SECRET/X-Smobilpay-Signature instead --
+    proves the endpoint is driven by the configured default, not hardcoded.
+    """
+    smobilpay_app = _build_app(app, default_aggregator="smobilpay")
+    client = smobilpay_app.test_client()
+
+    response = post_aggregator(
+        client,
+        app.config["SMOBILPAY_WEBHOOK_SECRET"],
+        campay_payload(order_id=2, external_transaction_id="SMOBIL-TX-0001"),
+        "X-Smobilpay-Signature",
+    )
+
+    assert response.status_code == 200
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    payment = conn.execute(
+        "SELECT * FROM payments WHERE external_transaction_id = 'SMOBIL-TX-0001'"
+    ).fetchone()
+    assert payment["provider"] == "smobilpay"
+
+
+def test_aggregator_webhook_returns_500_for_unknown_default_aggregator(app):
+    bad_app = _build_app(app, default_aggregator="unknown-aggregator")
+    client = bad_app.test_client()
+
+    response = client.post(
+        "/webhook/aggregator", data=b"{}", content_type="application/json"
+    )
+
+    assert response.status_code == 500
