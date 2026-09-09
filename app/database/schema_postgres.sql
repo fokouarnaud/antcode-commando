@@ -51,8 +51,9 @@ CREATE TABLE payments (
     payment_id               SERIAL PRIMARY KEY,
     order_id                 INTEGER NOT NULL REFERENCES orders (order_id),
     provider                 VARCHAR(64) NOT NULL,
-    external_transaction_id  VARCHAR(255) NOT NULL UNIQUE,
+    external_transaction_id  VARCHAR(255) NOT NULL,
     amount_fcfa              INTEGER NOT NULL,
     status                   VARCHAR(64) NOT NULL DEFAULT 'Pending',
-    received_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    received_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (provider, external_transaction_id)
 );

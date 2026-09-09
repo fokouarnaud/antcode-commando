@@ -1,10 +1,14 @@
 """Processes MTN MoMo / Orange Money payment callbacks.
 
-Idempotency is state-gated on payments.external_transaction_id (UNIQUE in
-the schema): a callback whose transaction id already has a payment row is
-a replay -- most commonly MTN retrying after a 3G timeout in Douala/Yaounde
-dropped our acknowledgement -- and is reported back as already_processed
-without inserting a second payment or re-applying the order update.
+Idempotency is state-gated on the (provider, external_transaction_id) pair
+(UNIQUE composite key in the schema): a callback whose provider+transaction
+id already has a payment row is a replay -- most commonly MTN retrying after
+a 3G timeout in Douala/Yaounde dropped our acknowledgement -- and is
+reported back as already_processed without inserting a second payment or
+re-applying the order update. The pair, not the transaction id alone, is
+what's checked: MTN and Orange mint their ids independently, so nothing
+prevents the two operators from ever producing the same string, and treating
+that coincidence as a replay would silently drop a real payment.
 """
 
 from app.config.database import format_query, get_last_row_id
@@ -21,11 +25,14 @@ _STATUS_MAP = {
 
 
 def process_momo_callback(conn, payload):
+    provider = payload.get("provider", "Unknown")
     external_transaction_id = payload["external_transaction_id"]
 
     existing = conn.execute(
-        format_query("SELECT payment_id FROM payments WHERE external_transaction_id = ?"),
-        (external_transaction_id,),
+        format_query(
+            "SELECT payment_id FROM payments WHERE provider = ? AND external_transaction_id = ?"
+        ),
+        (provider, external_transaction_id),
     ).fetchone()
     if existing:
         return {"status": "already_processed", "payment_id": existing["payment_id"]}
@@ -48,7 +55,7 @@ def process_momo_callback(conn, payload):
         ),
         (
             order_id,
-            payload.get("provider", "Unknown"),
+            provider,
             external_transaction_id,
             payload["amount_fcfa"],
             payment_status,

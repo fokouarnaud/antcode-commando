@@ -12,6 +12,12 @@
         "in": "header",
         "name": "X-Momo-Signature",
         "description": "Hex-encoded HMAC-SHA256 of the raw request body, keyed with the shared MOMO_WEBHOOK_SECRET. Verifies both sender authenticity and payload integrity (a tampered body invalidates the signature)."
+      },
+      "orangeSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Orange-Signature",
+        "description": "Hex-encoded HMAC-SHA256 of the raw request body, keyed with the shared ORANGE_WEBHOOK_SECRET. Verifies both sender authenticity and payload integrity (a tampered body invalidates the signature)."
       }
     },
     "schemas": {
@@ -37,10 +43,19 @@
         "type": "object",
         "required": ["order_id", "external_transaction_id", "amount_fcfa", "status"],
         "properties": {
-          "provider": { "type": "string", "example": "MTN MoMo" },
           "order_id": { "type": "integer", "example": 1 },
           "external_transaction_id": { "type": "string", "example": "MOMO-TX-0001" },
           "amount_fcfa": { "type": "integer", "example": 15000 },
+          "status": { "type": "string", "enum": ["SUCCESSFUL", "FAILED"] }
+        }
+      },
+      "OrangeCallback": {
+        "type": "object",
+        "required": ["order_id", "external_transaction_id", "amount_fcfa", "status"],
+        "properties": {
+          "order_id": { "type": "integer", "example": 2 },
+          "external_transaction_id": { "type": "string", "example": "ORANGE-TX-0001" },
+          "amount_fcfa": { "type": "integer", "example": 8000 },
           "status": { "type": "string", "enum": ["SUCCESSFUL", "FAILED"] }
         }
       }
@@ -108,8 +123,8 @@
     },
     "/webhook/momo": {
       "post": {
-        "summary": "MTN MoMo / Orange Money payment callback",
-        "description": "Idempotent: replaying the same external_transaction_id (e.g. after an MTN retry following a 3G timeout in Douala/Yaounde) returns already_processed instead of double-charging the order.",
+        "summary": "MTN MoMo payment callback",
+        "description": "Idempotent, keyed on (provider, external_transaction_id): replaying the same transaction id (e.g. after an MTN retry following a 3G timeout in Douala/Yaounde) returns already_processed instead of double-charging the order.",
         "security": [{ "momoSignature": [] }],
         "requestBody": {
           "required": true,
@@ -122,6 +137,26 @@
         "responses": {
           "200": { "description": "Processed, or already processed (idempotent replay)" },
           "401": { "description": "Missing, invalid, or payload-mismatched X-Momo-Signature" },
+          "404": { "description": "order_id does not exist" }
+        }
+      }
+    },
+    "/webhook/orange": {
+      "post": {
+        "summary": "Orange Money payment callback",
+        "description": "Idempotent, keyed on (provider, external_transaction_id): replaying the same transaction id returns already_processed instead of double-charging the order.",
+        "security": [{ "orangeSignature": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/OrangeCallback" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Processed, or already processed (idempotent replay)" },
+          "401": { "description": "Missing, invalid, or payload-mismatched X-Orange-Signature" },
           "404": { "description": "order_id does not exist" }
         }
       }

@@ -33,6 +33,29 @@ def post_momo(client, secret, payload, signature=None):
     )
 
 
+def orange_payload(**overrides):
+    payload = {
+        "order_id": 2,
+        "external_transaction_id": "ORANGE-TX-0001",
+        "amount_fcfa": 8000,
+        "status": "SUCCESSFUL",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def post_orange(client, secret, payload, signature=None):
+    raw_body = json.dumps(payload).encode()
+    if signature is None:
+        signature = sign(secret, raw_body)
+    return client.post(
+        "/webhook/orange",
+        data=raw_body,
+        content_type="application/json",
+        headers={"X-Orange-Signature": signature},
+    )
+
+
 def test_momo_webhook_rejects_request_with_missing_signature(client, app):
     raw_body = json.dumps(momo_payload()).encode()
 
@@ -113,3 +136,76 @@ def test_momo_webhook_returns_404_for_unknown_order(client, app):
     )
 
     assert response.status_code == 404
+
+
+def test_orange_webhook_rejects_tampered_payload_even_with_valid_looking_signature(client, app):
+    secret = app.config["ORANGE_WEBHOOK_SECRET"]
+    original_body = json.dumps(orange_payload(amount_fcfa=8000)).encode()
+    signature = sign(secret, original_body)
+    tampered_body = json.dumps(orange_payload(amount_fcfa=1)).encode()
+
+    response = client.post(
+        "/webhook/orange",
+        data=tampered_body,
+        content_type="application/json",
+        headers={"X-Orange-Signature": signature},
+    )
+
+    assert response.status_code == 401
+
+
+def test_orange_webhook_processes_valid_callback_and_marks_order_paid(client, app):
+    response = post_orange(client, app.config["ORANGE_WEBHOOK_SECRET"], orange_payload())
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "processed"
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    payment = conn.execute(
+        "SELECT * FROM payments WHERE external_transaction_id = 'ORANGE-TX-0001'"
+    ).fetchone()
+    assert payment["provider"] == "orange"
+    assert payment["status"] == "Successful"
+    order = conn.execute("SELECT payment_status FROM orders WHERE order_id = 2").fetchone()
+    assert order["payment_status"] == "Paid"
+
+
+def test_momo_webhook_rejects_orange_signature_for_the_momo_route(client, app):
+    """A signature computed with Orange's secret must not authenticate a
+    request against /webhook/momo -- the two providers' secrets aren't
+    interchangeable just because both endpoints share the same helper.
+    """
+    orange_secret = app.config["ORANGE_WEBHOOK_SECRET"]
+    response = post_momo(client, orange_secret, momo_payload())
+
+    assert response.status_code == 401
+
+
+def test_momo_and_orange_callbacks_reusing_the_same_transaction_id_are_independent(client, app):
+    """MTN and Orange transaction id formats could theoretically collide.
+    The idempotency lock is keyed on (provider, external_transaction_id), so
+    a shared string across the two providers must not be treated as a replay
+    of one another -- each is its own payment against its own order.
+    """
+    shared_id = "SHARED-TX-COLLISION"
+
+    momo_response = post_momo(
+        client,
+        app.config["MOMO_WEBHOOK_SECRET"],
+        momo_payload(order_id=1, external_transaction_id=shared_id),
+    )
+    orange_response = post_orange(
+        client,
+        app.config["ORANGE_WEBHOOK_SECRET"],
+        orange_payload(order_id=2, external_transaction_id=shared_id),
+    )
+
+    assert momo_response.get_json()["status"] == "processed"
+    assert orange_response.get_json()["status"] == "processed"
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    count = conn.execute(
+        "SELECT COUNT(*) AS n FROM payments WHERE external_transaction_id = ?",
+        (shared_id,),
+    ).fetchone()["n"]
+    assert count == 2

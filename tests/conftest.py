@@ -6,6 +6,7 @@ from app import create_app
 from app.config.database import get_connection, init_db
 
 WEBHOOK_SECRET = "test-momo-secret"
+ORANGE_WEBHOOK_SECRET = "test-orange-secret"
 
 os.environ["DB_ENGINE"] = "sqlite"
 
@@ -33,7 +34,11 @@ def app(tmp_path):
     conn.commit()
     conn.close()
 
-    return create_app(db_path=db_path, webhook_secret=WEBHOOK_SECRET)
+    return create_app(
+        db_path=db_path,
+        webhook_secret=WEBHOOK_SECRET,
+        orange_webhook_secret=ORANGE_WEBHOOK_SECRET,
+    )
 
 
 @pytest.fixture

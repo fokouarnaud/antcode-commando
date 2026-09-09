@@ -3,10 +3,11 @@ import flask
 from app.config.database import get_connection
 
 
-def create_app(db_path, webhook_secret):
+def create_app(db_path, webhook_secret, orange_webhook_secret):
     app = flask.Flask(__name__)
     app.config["DATABASE_PATH"] = db_path
     app.config["MOMO_WEBHOOK_SECRET"] = webhook_secret
+    app.config["ORANGE_WEBHOOK_SECRET"] = orange_webhook_secret
 
     from app.routes.docs import docs_bp
     from app.routes.orders import orders_bp
