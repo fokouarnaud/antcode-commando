@@ -74,30 +74,39 @@ without a join — see
 
 ```
 app/
-  __init__.py          create_app() factory, registers all blueprints
-  config/
-    database.py            get_connection(), init_db(), get_engine(), format_query()
-                            -- toggles sqlite3 / psycopg2 via DB_ENGINE env var
-  database/
-    schema_sqlite.sql        the 6-table schema + indexes (sqlite3)
-    schema_postgres.sql      same schema adapted for PostgreSQL (SERIAL/VARCHAR/TIMESTAMP)
-  docs/
-    openapi.json            OpenAPI 3.0 spec (static file, served as-is)
-  routes/
-    orders.py              GET /orders (filter + paginate), GET /orders/{id}
-    webhooks.py             POST /webhook/momo, POST /webhook/orange
-    docs.py                   GET /docs (Scalar UI), GET /openapi.json
-  services/
-    pipeline.py             ecommerce_orders_raw -> 6 tables ETL
-    orders.py                 order lookup + pagination queries
-    webhooks.py                idempotent MoMo/Orange callback processing
+├── __init__.py                     # create_app() factory, registers all blueprints
+├── config/
+│   └── database.py                 # get_connection(), init_db(), get_engine(), format_query()
+│                                    #   -- toggles sqlite3 / psycopg2 via DB_ENGINE env var
+├── database/
+│   ├── schema_sqlite.sql           # the 6-table schema + indexes (sqlite3)
+│   └── schema_postgres.sql         # same schema adapted for PostgreSQL (SERIAL/VARCHAR/TIMESTAMP)
+├── docs/
+│   └── openapi.json                # OpenAPI 3.0 spec (static file, served as-is)
+├── routes/
+│   ├── docs.py                     # GET /docs (Scalar UI), GET /openapi.json
+│   ├── orders.py                   # GET /orders (filter + paginate), GET /orders/{id}
+│   └── webhooks.py                 # POST /webhook/momo, POST /webhook/orange
+└── services/
+    ├── orders.py                   # order lookup + pagination queries
+    ├── pipeline.py                 # ecommerce_orders_raw -> 6 tables ETL
+    └── webhooks.py                 # idempotent MoMo/Orange callback processing
 scripts/
-  generate_mock_transactions.py   generates the messy CSV + loads ecommerce_orders_raw
-  load_structured_orders.py        runs the ETL against ecommerce.db
+├── generate_mock_transactions.py   # generates the messy CSV + loads ecommerce_orders_raw
+└── load_structured_orders.py       # runs the ETL against ecommerce.db
 docs/
-  indexing_and_query_optimization_report.md
-tests/                  one file per module above, plus conftest.py fixtures
-run.py                  dev entry point (python run.py)
+└── indexing_and_query_optimization_report.md
+tests/
+├── conftest.py                     # app/client fixtures shared by every test module
+├── test_database.py
+├── test_docs_routes.py
+├── test_generate_mock_transactions.py
+├── test_orders_routes.py
+├── test_pipeline.py
+└── test_webhooks.py
+run.py                               # dev entry point (python run.py)
+requirements.txt
+README.md
 ```
 
 ## Getting started
