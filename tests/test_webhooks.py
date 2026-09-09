@@ -444,6 +444,26 @@ def test_geniuspay_webhook_does_not_double_process_retried_callback(client, app)
     assert count == 1
 
 
+def test_geniuspay_webhook_acknowledges_test_event_without_touching_orders(client, app):
+    """GeniusPay's dashboard 'send test event' button fires event=webhook.test
+    with an empty body (no data/metadata block) -- this must not crash with
+    KeyError: 'metadata' or attempt any order lookup/payment insert.
+    """
+    response = post_geniuspay(
+        client, app.config["GENIUSPAY_WEBHOOK_SECRET"], {}, event="webhook.test"
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "status": "test_success",
+        "message": "Test webhook acknowledged",
+    }
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    count = conn.execute("SELECT COUNT(*) AS n FROM payments").fetchone()["n"]
+    assert count == 0
+
+
 def test_geniuspay_webhook_returns_404_for_unknown_order(client, app):
     response = post_geniuspay(
         client,

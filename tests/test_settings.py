@@ -4,6 +4,11 @@ import app.config.settings as settings_module
 
 
 def test_config_defaults_when_env_vars_unset(monkeypatch):
+    # A developer's local .env (loaded by settings.py's load_dotenv() call)
+    # is very likely to define these same keys for their own sandbox setup --
+    # that must not leak into this "truly unset" case, so load_dotenv() is
+    # neutralized for the reload rather than relying on .env's contents.
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: False)
     for var in [
         "DATABASE_URL", "DATABASE_PATH", "MOMO_WEBHOOK_SECRET",
         "ORANGE_WEBHOOK_SECRET", "CAMPAY_WEBHOOK_SECRET",

@@ -33,13 +33,20 @@ def _extract_fields(payload):
     """GeniusPay nests everything under data/metadata and signals outcome
     via the X-Webhook-Event header (mirrored into payload["event"] by the
     route) rather than a flat status field like the other providers.
+
+    GeniusPay's dashboard "send test event" button (event webhook.test)
+    fires with no data/metadata block at all, so every lookup here is
+    defensive: order_id falls back to None rather than raising KeyError,
+    and process_momo_callback() short-circuits on that event before it
+    would otherwise be treated as a malformed real payment.
     """
     if payload.get("provider") == "geniuspay":
-        data = payload["data"]
+        data = payload.get("data") or {}
+        metadata = data.get("metadata") or {}
         return (
-            data["metadata"]["order_id"],
-            data["transaction_id"],
-            data["amount"],
+            metadata.get("order_id"),
+            data.get("transaction_id"),
+            data.get("amount"),
             _GENIUSPAY_EVENT_STATUS.get(payload.get("event"), "PENDING"),
         )
     return (
@@ -51,6 +58,9 @@ def _extract_fields(payload):
 
 
 def process_momo_callback(conn, payload):
+    if payload.get("event") == "webhook.test":
+        return {"status": "test_success", "message": "Test webhook acknowledged"}
+
     provider = payload.get("provider", "Unknown")
     order_id, external_transaction_id, amount_fcfa, status_raw = _extract_fields(payload)
 
