@@ -1,9 +1,13 @@
+import os
+
 import pytest
 
 from app import create_app
-from app.database import get_connection, init_db
+from app.config.database import get_connection, init_db
 
 WEBHOOK_SECRET = "test-momo-secret"
+
+os.environ["DB_ENGINE"] = "sqlite"
 
 
 @pytest.fixture

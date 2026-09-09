@@ -1,4 +1,4 @@
-from app.database import get_connection
+from app.config.database import get_connection
 from scripts.generate_mock_transactions import (
     clean_row,
     ensure_import_table,

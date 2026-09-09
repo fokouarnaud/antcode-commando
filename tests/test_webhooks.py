@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import json
 
-from app.database import get_connection
+from app.config.database import get_connection
 
 
 def momo_payload(**overrides):

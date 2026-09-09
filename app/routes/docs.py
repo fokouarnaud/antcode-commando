@@ -3,7 +3,7 @@ import pathlib
 
 from flask import Blueprint, jsonify
 
-OPENAPI_PATH = pathlib.Path(__file__).parent.parent / "openapi.json"
+OPENAPI_PATH = pathlib.Path(__file__).parent.parent / "docs" / "openapi.json"
 
 docs_bp = Blueprint("docs", __name__)
 

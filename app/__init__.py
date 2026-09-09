@@ -1,6 +1,6 @@
 import flask
 
-from app.database import get_connection
+from app.config.database import get_connection
 
 
 def create_app(db_path, webhook_secret):

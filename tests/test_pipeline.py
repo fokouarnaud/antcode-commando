@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from app.database import get_connection, init_db
+from app.config.database import get_connection, init_db
 from app.services.pipeline import load_structured_data, normalize_neighborhood
 from scripts.generate_mock_transactions import ensure_import_table, insert_orders
 

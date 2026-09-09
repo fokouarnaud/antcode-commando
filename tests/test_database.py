@@ -1,8 +1,10 @@
+import sys
 import sqlite3
+import types
 
 import pytest
 
-from app.database import get_connection, init_db
+from app.config.database import format_query, get_connection, get_engine, init_db
 
 
 def test_get_connection_returns_usable_sqlite_connection():
@@ -86,3 +88,48 @@ def test_init_db_creates_orders_neighborhood_status_index():
         ).fetchall()
     ]
     assert index_columns == ["customer_neighborhood", "delivery_status"]
+
+
+def test_get_engine_defaults_to_sqlite(monkeypatch):
+    monkeypatch.delenv("DB_ENGINE", raising=False)
+
+    assert get_engine() == "sqlite"
+
+
+def test_get_engine_reads_db_engine_env_var(monkeypatch):
+    monkeypatch.setenv("DB_ENGINE", "postgresql")
+
+    assert get_engine() == "postgresql"
+
+
+def test_format_query_leaves_placeholders_unchanged_for_sqlite(monkeypatch):
+    monkeypatch.delenv("DB_ENGINE", raising=False)
+
+    assert format_query("SELECT * FROM orders WHERE order_id = ?") == (
+        "SELECT * FROM orders WHERE order_id = ?"
+    )
+
+
+def test_format_query_converts_placeholders_for_postgres(monkeypatch):
+    monkeypatch.setenv("DB_ENGINE", "postgresql")
+
+    assert format_query("SELECT * FROM orders WHERE order_id = ? AND status = ?") == (
+        "SELECT * FROM orders WHERE order_id = %s AND status = %s"
+    )
+
+
+def test_get_connection_uses_psycopg2_for_postgresql_engine(monkeypatch):
+    monkeypatch.setenv("DB_ENGINE", "postgresql")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pw@host/dbname")
+
+    calls = []
+    fake_connection = object()
+    fake_psycopg2 = types.SimpleNamespace(
+        connect=lambda dsn: calls.append(dsn) or fake_connection
+    )
+    monkeypatch.setitem(sys.modules, "psycopg2", fake_psycopg2)
+
+    result = get_connection("ignored-for-postgres.db")
+
+    assert calls == ["postgresql://user:pw@host/dbname"]
+    assert result is fake_connection

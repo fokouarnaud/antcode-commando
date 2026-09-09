@@ -56,9 +56,14 @@ without a join — see
 ```
 app/
   __init__.py          create_app() factory, registers all blueprints
-  database.py           get_connection(), init_db()
-  schema.sql             the 6-table schema + indexes
-  openapi.json             OpenAPI 3.0 spec (static file, served as-is)
+  config/
+    database.py            get_connection(), init_db(), get_engine(), format_query()
+                            -- toggles sqlite3 / psycopg2 via DB_ENGINE env var
+  database/
+    schema_sqlite.sql        the 6-table schema + indexes (sqlite3)
+    schema_postgres.sql      same schema adapted for PostgreSQL (SERIAL/VARCHAR/TIMESTAMP)
+  docs/
+    openapi.json            OpenAPI 3.0 spec (static file, served as-is)
   routes/
     orders.py              GET /orders, GET /orders/{id}
     webhooks.py             POST /webhook/momo

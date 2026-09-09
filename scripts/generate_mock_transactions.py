@@ -26,7 +26,7 @@ REPO_ROOT = pathlib.Path(__file__).parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.database import get_connection  # noqa: E402  (needs REPO_ROOT on sys.path first)
+from app.config.database import get_connection  # noqa: E402  (needs REPO_ROOT on sys.path first)
 
 CSV_PATH = REPO_ROOT / "data" / "ecommerce_orders_messy_data.csv"
 DB_PATH = REPO_ROOT / "ecommerce.db"
