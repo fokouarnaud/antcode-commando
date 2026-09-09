@@ -9,6 +9,8 @@ dedupes products by category, and maps known Douala/Yaounde neighborhoods
 to their city so addresses.city can stay NOT NULL and correct.
 """
 
+from app.config.database import format_query, get_last_row_id
+
 NEIGHBORHOOD_CITY = {
     "Akwa": "Douala",
     "Bonapriso": "Douala",
@@ -62,45 +64,45 @@ def _is_valid_row(row):
 
 def _get_or_create_customer(conn, external_ref):
     row = conn.execute(
-        "SELECT customer_id FROM customers WHERE full_name = ?",
+        format_query("SELECT customer_id FROM customers WHERE full_name = ?"),
         (f"Customer {external_ref}",),
     ).fetchone()
     if row:
         return row["customer_id"], False
     cursor = conn.execute(
-        "INSERT INTO customers (full_name, phone_number) VALUES (?, ?)",
+        format_query("INSERT INTO customers (full_name, phone_number) VALUES (?, ?)"),
         (f"Customer {external_ref}", f"+237-SYN-{external_ref}"),
     )
-    return cursor.lastrowid, True
+    return get_last_row_id(cursor, "customers", "customer_id"), True
 
 
 def _get_or_create_address(conn, customer_id, neighborhood):
     row = conn.execute(
-        "SELECT address_id FROM addresses WHERE customer_id = ? AND neighborhood = ?",
+        format_query("SELECT address_id FROM addresses WHERE customer_id = ? AND neighborhood = ?"),
         (customer_id, neighborhood),
     ).fetchone()
     if row:
         return row["address_id"], False
     city = NEIGHBORHOOD_CITY.get(neighborhood, DEFAULT_CITY)
     cursor = conn.execute(
-        "INSERT INTO addresses (customer_id, neighborhood, city) VALUES (?, ?, ?)",
+        format_query("INSERT INTO addresses (customer_id, neighborhood, city) VALUES (?, ?, ?)"),
         (customer_id, neighborhood, city),
     )
-    return cursor.lastrowid, True
+    return get_last_row_id(cursor, "addresses", "address_id"), True
 
 
 def _get_or_create_product(conn, category, unit_price_fcfa):
     row = conn.execute(
-        "SELECT product_id FROM products WHERE name = ?",
+        format_query("SELECT product_id FROM products WHERE name = ?"),
         (category,),
     ).fetchone()
     if row:
         return row["product_id"], False
     cursor = conn.execute(
-        "INSERT INTO products (name, category, unit_price_fcfa) VALUES (?, ?, ?)",
+        format_query("INSERT INTO products (name, category, unit_price_fcfa) VALUES (?, ?, ?)"),
         (category, category, int(unit_price_fcfa)),
     )
-    return cursor.lastrowid, True
+    return get_last_row_id(cursor, "products", "product_id"), True
 
 
 def load_structured_data(conn):
@@ -113,7 +115,7 @@ def load_structured_data(conn):
         "skipped": 0,
     }
 
-    rows = conn.execute("SELECT * FROM ecommerce_orders_raw").fetchall()
+    rows = conn.execute(format_query("SELECT * FROM ecommerce_orders_raw")).fetchall()
     seen_external_refs = set()
 
     for row in rows:
@@ -126,7 +128,7 @@ def load_structured_data(conn):
         seen_external_refs.add(external_ref)
 
         existing = conn.execute(
-            "SELECT order_id FROM orders WHERE external_ref = ?",
+            format_query("SELECT order_id FROM orders WHERE external_ref = ?"),
             (external_ref,),
         ).fetchone()
         if existing:
@@ -149,18 +151,22 @@ def load_structured_data(conn):
         counts["products"] += created
 
         cursor = conn.execute(
-            "INSERT INTO orders ("
-            "customer_id, address_id, customer_neighborhood, delivery_status, "
-            "payment_status, external_ref"
-            ") VALUES (?, ?, ?, ?, ?, ?)",
+            format_query(
+                "INSERT INTO orders ("
+                "customer_id, address_id, customer_neighborhood, delivery_status, "
+                "payment_status, external_ref"
+                ") VALUES (?, ?, ?, ?, ?, ?)"
+            ),
             (customer_id, address_id, neighborhood, delivery_status, payment_status, external_ref),
         )
-        order_id = cursor.lastrowid
+        order_id = get_last_row_id(cursor, "orders", "order_id")
         counts["orders"] += 1
 
         conn.execute(
-            "INSERT INTO order_items (order_id, product_id, quantity, unit_price_fcfa) "
-            "VALUES (?, ?, ?, ?)",
+            format_query(
+                "INSERT INTO order_items (order_id, product_id, quantity, unit_price_fcfa) "
+                "VALUES (?, ?, ?, ?)"
+            ),
             (order_id, product_id, int(row["quantity"]), int(row["unit_price_fcfa"])),
         )
         counts["order_items"] += 1

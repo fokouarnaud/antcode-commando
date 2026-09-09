@@ -4,7 +4,7 @@ import types
 
 import pytest
 
-from app.config.database import format_query, get_connection, get_engine, init_db
+from app.config.database import format_query, get_connection, get_engine, get_last_row_id, init_db
 
 
 def test_get_connection_returns_usable_sqlite_connection():
@@ -133,3 +133,39 @@ def test_get_connection_uses_psycopg2_for_postgresql_engine(monkeypatch):
 
     assert calls == ["postgresql://user:pw@host/dbname"]
     assert result is fake_connection
+
+
+def test_get_last_row_id_returns_cursor_lastrowid_for_sqlite(monkeypatch):
+    monkeypatch.delenv("DB_ENGINE", raising=False)
+    conn = get_connection(":memory:")
+    init_db(conn)
+    cursor = conn.execute(
+        "INSERT INTO customers (full_name, phone_number) VALUES (?, ?)",
+        ("Amina Njoya", "+237690000001"),
+    )
+
+    assert get_last_row_id(cursor, "customers", "customer_id") == cursor.lastrowid
+
+
+def test_get_last_row_id_queries_currval_for_postgresql(monkeypatch):
+    monkeypatch.setenv("DB_ENGINE", "postgresql")
+
+    class FakeCursor:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, sql, params):
+            self.calls.append((sql, params))
+
+        def fetchone(self):
+            return (42,)
+
+    cursor = FakeCursor()
+
+    result = get_last_row_id(cursor, "customers", "customer_id")
+
+    assert result == 42
+    assert len(cursor.calls) == 1
+    sql, params = cursor.calls[0]
+    assert "pg_get_serial_sequence" in sql
+    assert params == ("customers", "customer_id")

@@ -7,6 +7,9 @@ dropped our acknowledgement -- and is reported back as already_processed
 without inserting a second payment or re-applying the order update.
 """
 
+from app.config.database import format_query, get_last_row_id
+
+
 class OrderNotFoundError(Exception):
     pass
 
@@ -21,7 +24,7 @@ def process_momo_callback(conn, payload):
     external_transaction_id = payload["external_transaction_id"]
 
     existing = conn.execute(
-        "SELECT payment_id FROM payments WHERE external_transaction_id = ?",
+        format_query("SELECT payment_id FROM payments WHERE external_transaction_id = ?"),
         (external_transaction_id,),
     ).fetchone()
     if existing:
@@ -29,7 +32,7 @@ def process_momo_callback(conn, payload):
 
     order_id = payload["order_id"]
     order = conn.execute(
-        "SELECT order_id FROM orders WHERE order_id = ?", (order_id,)
+        format_query("SELECT order_id FROM orders WHERE order_id = ?"), (order_id,)
     ).fetchone()
     if order is None:
         raise OrderNotFoundError(order_id)
@@ -39,8 +42,10 @@ def process_momo_callback(conn, payload):
     )
 
     cursor = conn.execute(
-        "INSERT INTO payments (order_id, provider, external_transaction_id, amount_fcfa, status) "
-        "VALUES (?, ?, ?, ?, ?)",
+        format_query(
+            "INSERT INTO payments (order_id, provider, external_transaction_id, amount_fcfa, status) "
+            "VALUES (?, ?, ?, ?, ?)"
+        ),
         (
             order_id,
             payload.get("provider", "Unknown"),
@@ -50,9 +55,9 @@ def process_momo_callback(conn, payload):
         ),
     )
     conn.execute(
-        "UPDATE orders SET payment_status = ? WHERE order_id = ?",
+        format_query("UPDATE orders SET payment_status = ? WHERE order_id = ?"),
         (order_payment_status, order_id),
     )
     conn.commit()
 
-    return {"status": "processed", "payment_id": cursor.lastrowid}
+    return {"status": "processed", "payment_id": get_last_row_id(cursor, "payments", "payment_id")}
