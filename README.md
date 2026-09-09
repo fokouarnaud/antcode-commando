@@ -288,7 +288,7 @@ in the schema) catches it before any insert, exactly as proven by
 python -m pytest -v
 ```
 
-102 tests, 100% passing (`python -m pytest -v`). Every behavior above —
+107 tests, 100% passing (`python -m pytest -v`). Every behavior above —
 including the schema, the CRUD services/routes, the dual-engine connection
 layer, the multi-provider webhooks, the GeniusPay checkout/webhook
 lifecycle, the offline sync endpoint, the seeder, and the paginated order
@@ -298,30 +298,49 @@ minimal code to close it, per the project's
 
 ## Cameroonian context adaptation
 
-### Volume seeder: realistic identity, not synthetic placeholders
+### Volume seeder: three independent pools, not one duplicated per order
 
-`scripts/seed_cameroon_volume.py` inserts 500 transaction logs straight into
-the normalized tables through `get_connection()`/`format_query()` — no raw
-staging table, no ETL step:
+`scripts/seed_cameroon_volume.py` inserts realistic transaction logs straight
+into the normalized tables through `get_connection()`/`format_query()` — no
+raw staging table, no ETL step. `main()` first calls `reset_database()`
+(drops every table, child-before-parent, then re-runs `init_db()`) so each
+run starts from a pristine slate rather than accumulating on top of
+whatever the file already held.
 
-- **Products first** (Electronics/Phones/Fashion, e.g. Tecno/Samsung/Infinix
-  phones, TVs, wax print fabric), get-or-created by name so re-running the
-  seeder never duplicates a product.
-- **500 distinct customers**, each with a real-looking Cameroonian
-  full name and a unique `+2376XXXXXXXX` mobile number.
-- **One address per customer**, in a real Douala/Yaoundé neighborhood (Akwa,
-  Bonapriso → Douala; Bastos, Mendong, Biyem-Assi → Yaoundé) — never a
-  placeholder city.
-- **One order per customer**, referencing a random product directly
-  (`orders.product_id`), with a random quantity and one of the three
-  tracking states (`Pending`/`Shipped`/`Delivered`), and a sequential
-  `order_id` (`ECM-NNNNN`) that continues from whatever the table's current
-  maximum already is.
+Three phases populate three genuinely independent pools, each fully built
+before the next reads from it — an earlier revision instead created one new
+address row per customer (500 near-duplicate rows for 5 neighborhoods),
+which this structure now makes structurally impossible:
 
-Verified by `tests/test_seed_cameroon_volume.py`: exactly 500 rows in each
-of `customers`/`addresses`/`orders`, every phone number unique and
-`+2376`-formatted, every neighborhood mapped to its correct city, and every
-`delivery_status` one of the three valid tracking states.
+- **Reference data**: products (Electronics/Phones/Fashion, e.g.
+  Tecno/Samsung/Infinix phones, TVs, wax print fabric) and a **fixed pool of
+  5 logistics addresses**, get-or-created by name/(`neighborhood`, `city`)
+  — one row per Douala/Yaoundé neighborhood (Akwa, Bonapriso → Douala;
+  Bastos, Mendong, Biyem-Assi → Yaoundé), owned by no customer
+  (`addresses.customer_id IS NULL`).
+- **100 distinct customers**, each with a real-looking Cameroonian full
+  name and a unique `+2376XXXXXXXX` mobile number — no address of their own
+  at this stage.
+- **500 orders**, each picking an *existing* `customer_id`, `address_id`,
+  and `product_id` at random from the pools above (never creating a new
+  one), with a random quantity, one of the three tracking states
+  (`Pending`/`Shipped`/`Delivered`), and a sequential `order_id`
+  (`ECM-NNNNN`).
+
+This mirrors real e-commerce behavior directly: customers place multiple
+orders, and many orders/customers share the same canonical delivery zone.
+`app/services/orders.py::_get_or_create_address()` (used by this seeder,
+`POST /orders`, and `POST /orders/sync`) is keyed purely on
+`(neighborhood, city)` for exactly this reason — contrast with a customer's
+own *registered* address in `app/services/customers.py`, which legitimately
+belongs to that one customer and is a separate, unaffected code path.
+
+Verified by `tests/test_seed_cameroon_volume.py`: exactly 5 address rows
+(one per neighborhood, `customer_id IS NULL`) and 100 customers regardless
+of how many of the 500 orders are generated; every order's `customer_id`/
+`address_id` comes from the pre-populated pool, not a fresh insert; every
+phone number unique and `+2376`-formatted; and `reset_database()` verified
+to zero every table before a second seeding run reproduces the same counts.
 
 ### Network timeout protection: idempotent webhook
 
@@ -432,6 +451,7 @@ TDD red/green/refactor loop.
 | Phase 14: Centralized settings | `/goal` | New `app/config/settings.py::Config` (env-var-backed, uppercase class attributes for Flask's `from_object`); `create_app()` takes zero arguments and loads it via `app.config.from_object("app.config.settings.Config")`; `run.py` reduced to `create_app()`; `conftest.py`/`test_webhooks.py::_build_app()` inject isolated test config directly into `app.config` post-construction instead of passing constructor kwargs | 2 new tests (`tests/test_settings.py`: defaults, env-var overrides) — 50 tests passing. `get_connection()`/`get_engine()`/`format_query()` in `app/config/database.py` deliberately still read `os.environ` directly rather than `current_app.config` -- they're also called from `scripts/` with no Flask app context, where `current_app` would raise |
 | — | `/goal` | A directive claiming this README was "truncated" and listing specific missing sections -- the same claim (and the same sections, all already present) as part of the Phase 13 request above, this time as a standalone directive | No code changed — re-verified every claimed-missing section by line number (`grep -n "^## \|^### "`), all present and complete; reported back that this repeats an already-checked false premise |
 | Phase 15: Clean CRUD architecture + Cameroonian seeder | `/goal` | Deleted the ETL demo (`scripts/generate_mock_transactions.py`, `scripts/load_structured_orders.py`, `app/services/pipeline.py`, `ecommerce_orders_raw`); dropped `order_items` and the denormalized `orders.customer_neighborhood` column, replaced by a direct `orders.product_id`/`quantity`/`unit_price_fcfa` and a join to `addresses`; renamed `idx_orders_neighborhood_status` to `idx_orders_delivery_status`; added full CRUD (`app/services/products.py`, `app/services/customers.py`, `app/routes/products.py`, `app/routes/customers.py`, plus `POST`/`PUT`/`DELETE /orders/{id}`); added `scripts/seed_cameroon_volume.py` (500 Cameroonian orders via `get_connection()`/`format_query()`) | 102 tests passing (new `test_products_routes.py`, `test_customers_routes.py`, `test_seed_cameroon_volume.py`; existing suites updated for the new schema shape) |
+| Phase 16: Seeder reusability fix | `/goal` | Fixed a normalization flaw Phase 15's seeder introduced: it created one new `addresses` row per customer, so 500 seeded orders meant ~500 near-duplicate address rows for only 5 real neighborhoods. Made `addresses.customer_id` nullable (a shared logistics reference address has no single owner); reworked `app/services/orders.py::_get_or_create_address()` to key purely on `(neighborhood, city)` instead of `(customer_id, neighborhood)`, used by `POST /orders`/`POST /orders/sync` and this seeder alike; `app/services/customers.py`'s own customer-owned-address path is a deliberately separate, untouched concept. Rewrote `scripts/seed_cameroon_volume.py` into three independent pools (products+5 reference addresses, then 100 customers, then 500 orders randomly picking from the existing pools) plus `reset_database()` (drop-all + `init_db()`) called from `main()` for a pristine slate every run | 107 tests passing (`test_seed_cameroon_volume.py` rewritten around the three-pool structure; new `test_sync_reuses_shared_address_across_different_customers_in_same_neighborhood` regression test proving the fix) |
 
 Each `/goal` phase followed the same discipline: RED (failing test proving
 the gap) → GREEN (minimal code to close it) → REFACTOR (clean up without

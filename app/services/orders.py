@@ -100,16 +100,24 @@ def _get_or_create_customer(conn, full_name, phone_number):
     return get_last_row_id(cursor, "customers", "customer_id")
 
 
-def _get_or_create_address(conn, customer_id, neighborhood, city):
+def _get_or_create_address(conn, neighborhood, city):
+    """Addresses reached through this path are shared logistics reference
+    points (e.g. "Akwa, Douala"), not owned by any one customer -- keyed
+    and deduped purely on (neighborhood, city) so every customer/order
+    that ships to the same zone reuses the same row instead of each
+    minting its own near-duplicate. (Contrast with a customer's own
+    registered address in app/services/customers.py, which legitimately
+    belongs to that customer.) Inserted rows get customer_id = NULL.
+    """
     row = conn.execute(
-        format_query("SELECT address_id FROM addresses WHERE customer_id = ? AND neighborhood = ?"),
-        (customer_id, neighborhood),
+        format_query("SELECT address_id FROM addresses WHERE neighborhood = ? AND city = ?"),
+        (neighborhood, city),
     ).fetchone()
     if row:
         return row["address_id"]
     cursor = conn.execute(
-        format_query("INSERT INTO addresses (customer_id, neighborhood, city) VALUES (?, ?, ?)"),
-        (customer_id, neighborhood, city),
+        format_query("INSERT INTO addresses (neighborhood, city) VALUES (?, ?)"),
+        (neighborhood, city),
     )
     return get_last_row_id(cursor, "addresses", "address_id")
 
@@ -160,7 +168,7 @@ def create_order(conn, order):
         address_id = order["address_id"]
     elif neighborhood:
         address_id = _get_or_create_address(
-            conn, customer_id, neighborhood, order.get("city", _DEFAULT_CITY)
+            conn, neighborhood, order.get("city", _DEFAULT_CITY)
         )
     else:
         raise OrderValidationError("missing required field: 'address_id' or 'neighborhood'")
@@ -267,7 +275,7 @@ def sync_offline_orders(conn, orders):
         neighborhood = order["neighborhood"]
         customer_id = _get_or_create_customer(conn, order["customer_name"], order["customer_phone"])
         address_id = _get_or_create_address(
-            conn, customer_id, neighborhood, order.get("city", _DEFAULT_CITY)
+            conn, neighborhood, order.get("city", _DEFAULT_CITY)
         )
         product_id, unit_price_fcfa = _get_or_create_product(
             conn,

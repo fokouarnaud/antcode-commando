@@ -236,6 +236,57 @@ def test_sync_reuses_existing_customer_and_address_across_orders(client, app):
     assert customer_count == 1
 
 
+def test_sync_reuses_shared_address_across_different_customers_in_same_neighborhood(client, app):
+    """Two DIFFERENT customers ordering to the same neighborhood must reuse
+    one shared address row (a logistics reference point, not owned by a
+    single customer), not each mint their own copy of it -- the anti-pattern
+    this fix removes. conftest already seeds an Akwa/Douala address, so this
+    proves the sync path finds and reuses that same row.
+    """
+    payload = [
+        {
+            "order_id": "OFFLINE-0010",
+            "customer_name": "Grace Fotso",
+            "customer_phone": "+237699999910",
+            "neighborhood": "Akwa",
+            "city": "Douala",
+            "product_name": "Smartphone Tecno Spark",
+            "category": "Electronics",
+            "unit_price_fcfa": 75000,
+            "quantity": 1,
+        },
+        {
+            "order_id": "OFFLINE-0011",
+            "customer_name": "Herve Talla",
+            "customer_phone": "+237699999911",
+            "neighborhood": "Akwa",
+            "city": "Douala",
+            "product_name": "Smartphone Tecno Spark",
+            "category": "Electronics",
+            "unit_price_fcfa": 75000,
+            "quantity": 1,
+        },
+    ]
+
+    response = client.post("/orders/sync", json=payload)
+
+    assert response.get_json() == {"synced": 2, "skipped": 0}
+
+    conn = get_connection(app.config["DATABASE_PATH"])
+    address_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM addresses WHERE neighborhood = 'Akwa'"
+    ).fetchone()["n"]
+    assert address_count == 1
+
+    address_ids = {
+        row["address_id"]
+        for row in conn.execute(
+            "SELECT address_id FROM orders WHERE order_id IN ('OFFLINE-0010', 'OFFLINE-0011')"
+        )
+    }
+    assert address_ids == {1}
+
+
 def test_sync_returns_400_for_non_array_payload(client):
     response = client.post("/orders/sync", json={"not": "a list"})
 

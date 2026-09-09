@@ -5,9 +5,12 @@ CREATE TABLE customers (
     created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- customer_id is nullable: a customer-registered address is owned by that
+-- customer, but a shared logistics reference address (e.g. seeded canonical
+-- neighborhood zones reused across many orders/customers) has no single owner.
 CREATE TABLE addresses (
     address_id      SERIAL PRIMARY KEY,
-    customer_id     INTEGER NOT NULL REFERENCES customers (customer_id),
+    customer_id     INTEGER REFERENCES customers (customer_id),
     neighborhood    VARCHAR(255) NOT NULL,
     city            VARCHAR(255) NOT NULL,
     street_details  VARCHAR(255),
