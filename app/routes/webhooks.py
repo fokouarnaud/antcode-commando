@@ -56,7 +56,7 @@ def _signed_message(config):
 def _webhook(provider):
     config = _PROVIDER_CONFIG.get(provider)
     if config is None:
-        return jsonify({"error": f"unknown aggregator: {provider}"}), 500
+        return jsonify({"error": f"unknown provider: {provider}"}), 500
 
     secret = current_app.config[config["secret_key"]]
     signature = request.headers.get(config["signature_header"], "")
@@ -79,25 +79,13 @@ def _webhook(provider):
     return jsonify(result), 200
 
 
-@webhooks_bp.route("/webhook/momo", methods=["POST"])
-def momo_webhook():
-    return _webhook("momo")
-
-
-@webhooks_bp.route("/webhook/orange", methods=["POST"])
-def orange_webhook():
-    return _webhook("orange")
-
-
-@webhooks_bp.route("/webhooks/geniuspay", methods=["POST"])
-def geniuspay_webhook():
-    return _webhook("geniuspay")
-
-
-@webhooks_bp.route("/webhook/aggregator", methods=["POST"])
-def aggregator_webhook():
-    """Routes to whichever aggregator (Campay, Smobilpay, ...) is configured
-    as DEFAULT_AGGREGATOR, so adding a new aggregator only means adding an
-    entry to _PROVIDER_CONFIG -- no new route or view function.
+@webhooks_bp.route("/webhook/<provider>", methods=["POST"])
+def provider_webhook(provider):
+    """Single dynamic entry point for every provider's payment callback --
+    the provider name comes straight from the URL and is handed to
+    _webhook(), which resolves that provider's own secret, signature
+    header, and (for GeniusPay) timestamp/event headers from
+    _PROVIDER_CONFIG. Adding a new provider only means adding an entry to
+    _PROVIDER_CONFIG -- no new route or view function.
     """
-    return _webhook(current_app.config["DEFAULT_AGGREGATOR"])
+    return _webhook(provider)

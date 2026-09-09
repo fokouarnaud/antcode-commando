@@ -2,7 +2,6 @@ import hashlib
 import hmac
 import json
 
-from app import create_app
 from app.config.database import get_connection
 
 
@@ -223,44 +222,26 @@ def campay_payload(**overrides):
     return payload
 
 
-def post_aggregator(client, secret, payload, header, signature=None):
+def post_provider(client, provider, secret, payload, header, signature=None):
     raw_body = json.dumps(payload).encode()
     if signature is None:
         signature = sign(secret, raw_body)
     return client.post(
-        "/webhook/aggregator",
+        f"/webhook/{provider}",
         data=raw_body,
         content_type="application/json",
         headers={header: signature},
     )
 
 
-def _build_app(app, **config_overrides):
-    """Builds a second app instance seeded from the test app's own config
-    (app.config injection, same as conftest.py's fixture), so a test can
-    flip one setting -- e.g. default_aggregator="smobilpay" -- without
-    touching the shared `app` fixture other tests in this module rely on.
+def test_webhook_route_processes_campay_callback_via_its_own_provider_secret(client, app):
+    """campay is just another entry in _PROVIDER_CONFIG -- /webhook/campay
+    must resolve CAMPAY_WEBHOOK_SECRET/X-Campay-Signature directly from the
+    URL, with no DEFAULT_AGGREGATOR indirection involved.
     """
-    new_app = create_app()
-    for key in (
-        "DATABASE_PATH", "MOMO_WEBHOOK_SECRET", "ORANGE_WEBHOOK_SECRET",
-        "CAMPAY_WEBHOOK_SECRET", "SMOBILPAY_WEBHOOK_SECRET", "GENIUSPAY_WEBHOOK_SECRET",
-        "DEFAULT_AGGREGATOR",
-    ):
-        new_app.config[key] = app.config[key]
-    for key, value in config_overrides.items():
-        new_app.config[key.upper()] = value
-    return new_app
-
-
-def test_aggregator_webhook_verifies_with_the_default_aggregators_secret(client, app):
-    """The test app fixture's DEFAULT_AGGREGATOR is 'campay' -- /webhook/aggregator
-    must accept a signature computed with CAMPAY_WEBHOOK_SECRET over
-    X-Campay-Signature, proving it dynamically resolved campay's config
-    rather than being hardcoded to one provider.
-    """
-    response = post_aggregator(
+    response = post_provider(
         client,
+        "campay",
         app.config["CAMPAY_WEBHOOK_SECRET"],
         campay_payload(),
         "X-Campay-Signature",
@@ -276,16 +257,10 @@ def test_aggregator_webhook_verifies_with_the_default_aggregators_secret(client,
     assert payment["provider"] == "campay"
 
 
-def test_aggregator_webhook_switches_secret_when_default_aggregator_changes(app):
-    """Swapping DEFAULT_AGGREGATOR to 'smobilpay' must make /webhook/aggregator
-    verify against SMOBILPAY_WEBHOOK_SECRET/X-Smobilpay-Signature instead --
-    proves the endpoint is driven by the configured default, not hardcoded.
-    """
-    smobilpay_app = _build_app(app, default_aggregator="smobilpay")
-    client = smobilpay_app.test_client()
-
-    response = post_aggregator(
+def test_webhook_route_processes_smobilpay_callback_via_its_own_provider_secret(client, app):
+    response = post_provider(
         client,
+        "smobilpay",
         app.config["SMOBILPAY_WEBHOOK_SECRET"],
         campay_payload(order_id=2, external_transaction_id="SMOBIL-TX-0001"),
         "X-Smobilpay-Signature",
@@ -300,12 +275,9 @@ def test_aggregator_webhook_switches_secret_when_default_aggregator_changes(app)
     assert payment["provider"] == "smobilpay"
 
 
-def test_aggregator_webhook_returns_500_for_unknown_default_aggregator(app):
-    bad_app = _build_app(app, default_aggregator="unknown-aggregator")
-    client = bad_app.test_client()
-
+def test_webhook_route_returns_500_for_unknown_provider(client):
     response = client.post(
-        "/webhook/aggregator", data=b"{}", content_type="application/json"
+        "/webhook/unknown-provider", data=b"{}", content_type="application/json"
     )
 
     assert response.status_code == 500
@@ -331,7 +303,7 @@ def post_geniuspay(client, secret, payload, event="payment.success", timestamp="
     if signature is None:
         signature = sign_geniuspay(secret, timestamp, raw_body_string)
     return client.post(
-        "/webhooks/geniuspay",
+        "/webhook/geniuspay",
         data=raw_body_string.encode(),
         content_type="application/json",
         headers={
@@ -346,7 +318,7 @@ def test_geniuspay_webhook_rejects_request_with_missing_signature(client, app):
     raw_body_string = json.dumps(geniuspay_payload())
 
     response = client.post(
-        "/webhooks/geniuspay",
+        "/webhook/geniuspay",
         data=raw_body_string.encode(),
         content_type="application/json",
         headers={"X-Webhook-Timestamp": "1700000000", "X-Webhook-Event": "payment.success"},
@@ -366,7 +338,7 @@ def test_geniuspay_webhook_rejects_tampered_body_even_with_valid_looking_signatu
     tampered_body = json.dumps(geniuspay_payload(amount=999999999))
 
     response = client.post(
-        "/webhooks/geniuspay",
+        "/webhook/geniuspay",
         data=tampered_body.encode(),
         content_type="application/json",
         headers={

@@ -3,33 +3,15 @@
   "info": {
     "title": "AntCode Commando - E-Commerce Logistics API",
     "version": "1.0.0",
-    "description": "Order lookups over the customer_neighborhood/delivery_status composite index, and the idempotent MTN MoMo / Orange Money / aggregator / GeniusPay payment webhooks."
+    "description": "Order lookups over the customer_neighborhood/delivery_status composite index, and a single idempotent /webhook/{provider} payment callback shared by MTN MoMo, Orange Money, Campay, Smobilpay, and GeniusPay."
   },
   "components": {
     "securitySchemes": {
-      "momoSignature": {
+      "providerSignature": {
         "type": "apiKey",
         "in": "header",
-        "name": "X-Momo-Signature",
-        "description": "Hex-encoded HMAC-SHA256 of the raw request body, keyed with the shared MOMO_WEBHOOK_SECRET. Verifies both sender authenticity and payload integrity (a tampered body invalidates the signature)."
-      },
-      "orangeSignature": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "X-Orange-Signature",
-        "description": "Hex-encoded HMAC-SHA256 of the raw request body, keyed with the shared ORANGE_WEBHOOK_SECRET. Verifies both sender authenticity and payload integrity (a tampered body invalidates the signature)."
-      },
-      "aggregatorSignature": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "X-Aggregator-Signature",
-        "description": "Placeholder name for whichever header the active DEFAULT_AGGREGATOR actually expects (e.g. X-Campay-Signature, X-Smobilpay-Signature) -- hex-encoded HMAC-SHA256 of the raw request body, keyed with that aggregator's own secret (e.g. CAMPAY_WEBHOOK_SECRET)."
-      },
-      "geniuspaySignature": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "X-Webhook-Signature",
-        "description": "Hex-encoded HMAC-SHA256 of f\"{X-Webhook-Timestamp}.{raw_request_body}\", keyed with GENIUSPAY_WEBHOOK_SECRET -- GeniusPay's structural validation spec binds both the timestamp and body into the signature, unlike the other providers which sign the raw body alone."
+        "name": "X-Provider-Signature",
+        "description": "Placeholder name for whichever signature header the {provider} path segment actually expects, resolved dynamically from _PROVIDER_CONFIG (app/routes/webhooks.py): momo -> X-Momo-Signature/MOMO_WEBHOOK_SECRET, orange -> X-Orange-Signature/ORANGE_WEBHOOK_SECRET, campay -> X-Campay-Signature/CAMPAY_WEBHOOK_SECRET, smobilpay -> X-Smobilpay-Signature/SMOBILPAY_WEBHOOK_SECRET, geniuspay -> X-Webhook-Signature/GENIUSPAY_WEBHOOK_SECRET. All of them are a hex-encoded HMAC-SHA256 of the raw request body except geniuspay, which signs f\"{X-Webhook-Timestamp}.{raw_request_body}\" instead (also requires the X-Webhook-Timestamp and X-Webhook-Event headers)."
       }
     },
     "schemas": {
@@ -60,33 +42,14 @@
           "total_pages": { "type": "integer", "example": 1 }
         }
       },
-      "MomoCallback": {
+      "StandardProviderCallback": {
         "type": "object",
+        "description": "Flat callback shape shared by momo, orange, campay, and smobilpay.",
         "required": ["order_id", "external_transaction_id", "amount_fcfa", "status"],
         "properties": {
           "order_id": { "type": "integer", "example": 1 },
           "external_transaction_id": { "type": "string", "example": "MOMO-TX-0001" },
           "amount_fcfa": { "type": "integer", "example": 15000 },
-          "status": { "type": "string", "enum": ["SUCCESSFUL", "FAILED"] }
-        }
-      },
-      "OrangeCallback": {
-        "type": "object",
-        "required": ["order_id", "external_transaction_id", "amount_fcfa", "status"],
-        "properties": {
-          "order_id": { "type": "integer", "example": 2 },
-          "external_transaction_id": { "type": "string", "example": "ORANGE-TX-0001" },
-          "amount_fcfa": { "type": "integer", "example": 8000 },
-          "status": { "type": "string", "enum": ["SUCCESSFUL", "FAILED"] }
-        }
-      },
-      "AggregatorCallback": {
-        "type": "object",
-        "required": ["order_id", "external_transaction_id", "amount_fcfa", "status"],
-        "properties": {
-          "order_id": { "type": "integer", "example": 1 },
-          "external_transaction_id": { "type": "string", "example": "CAMPAY-TX-0001" },
-          "amount_fcfa": { "type": "integer", "example": 5000 },
           "status": { "type": "string", "enum": ["SUCCESSFUL", "FAILED"] }
         }
       },
@@ -111,6 +74,13 @@
             }
           }
         }
+      },
+      "WebhookCallback": {
+        "description": "Body shape depends on which provider the {provider} path segment names: momo/orange/campay/smobilpay send the flat StandardProviderCallback shape, geniuspay sends the nested GeniusPayCallback shape.",
+        "oneOf": [
+          { "$ref": "#/components/schemas/StandardProviderCallback" },
+          { "$ref": "#/components/schemas/GeniusPayCallback" }
+        ]
       }
     }
   },
@@ -196,64 +166,34 @@
         }
       }
     },
-    "/webhook/momo": {
+    "/webhook/{provider}": {
       "post": {
-        "summary": "MTN MoMo payment callback",
-        "description": "Idempotent, keyed on (provider, external_transaction_id): replaying the same transaction id (e.g. after an MTN retry following a 3G timeout in Douala/Yaounde) returns already_processed instead of double-charging the order.",
-        "security": [{ "momoSignature": [] }],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": { "$ref": "#/components/schemas/MomoCallback" }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Processed, or already processed (idempotent replay)" },
-          "401": { "description": "Missing, invalid, or payload-mismatched X-Momo-Signature" },
-          "404": { "description": "order_id does not exist" }
-        }
-      }
-    },
-    "/webhook/orange": {
-      "post": {
-        "summary": "Orange Money payment callback",
-        "description": "Idempotent, keyed on (provider, external_transaction_id): replaying the same transaction id returns already_processed instead of double-charging the order.",
-        "security": [{ "orangeSignature": [] }],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": { "$ref": "#/components/schemas/OrangeCallback" }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Processed, or already processed (idempotent replay)" },
-          "401": { "description": "Missing, invalid, or payload-mismatched X-Orange-Signature" },
-          "404": { "description": "order_id does not exist" }
-        }
-      }
-    },
-    "/webhooks/geniuspay": {
-      "post": {
-        "summary": "GeniusPay Merchant API payment callback",
-        "description": "Idempotent, keyed on (provider, external_transaction_id), same as the other webhooks. Verified against GeniusPay's structural spec: the signature covers f\"{timestamp}.{raw_body}\", not the raw body alone. order_id is read from data.metadata.order_id (set by our own initiate_geniuspay_payment() call), and the payment/order status transitions to Paid only when X-Webhook-Event is payment.success.",
-        "security": [{ "geniuspaySignature": [] }],
+        "summary": "Payment callback for the named provider",
+        "description": "Single dynamic entry point for every provider's payment callback -- momo, orange, campay, smobilpay, and geniuspay. _webhook() (app/routes/webhooks.py) resolves that provider's own secret, signature header, and (geniuspay only) timestamp/event headers from _PROVIDER_CONFIG. Idempotent, keyed on (provider, external_transaction_id): replaying the same transaction id (e.g. after an MTN retry following a 3G timeout in Douala/Yaounde) returns already_processed instead of double-charging the order. For geniuspay, order_id is read from data.metadata.order_id, the order is marked Paid only when X-Webhook-Event is payment.success, and a webhook.test event is acknowledged without touching orders. Adding a new provider only means adding an entry to _PROVIDER_CONFIG -- not a new route.",
+        "security": [{ "providerSignature": [] }],
         "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "description": "Which payment provider sent this callback. Any value with no entry in _PROVIDER_CONFIG returns 500.",
+            "schema": {
+              "type": "string",
+              "enum": ["momo", "orange", "campay", "smobilpay", "geniuspay"]
+            }
+          },
           {
             "name": "X-Webhook-Timestamp",
             "in": "header",
-            "required": true,
-            "description": "Unix timestamp GeniusPay signed alongside the body; part of the HMAC message.",
+            "required": false,
+            "description": "geniuspay only: Unix timestamp GeniusPay signed alongside the body; part of the HMAC message.",
             "schema": { "type": "string", "example": "1700000000" }
           },
           {
             "name": "X-Webhook-Event",
             "in": "header",
-            "required": true,
-            "description": "Event type. payment.success marks the order Paid; anything else leaves it unpaid.",
+            "required": false,
+            "description": "geniuspay only: event type. payment.success marks the order Paid; webhook.test is acknowledged without touching orders; anything else leaves it unpaid.",
             "schema": { "type": "string", "example": "payment.success" }
           }
         ],
@@ -261,35 +201,15 @@
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/GeniusPayCallback" }
+              "schema": { "$ref": "#/components/schemas/WebhookCallback" }
             }
           }
         },
         "responses": {
-          "200": { "description": "Processed, or already processed (idempotent replay)" },
-          "401": { "description": "Missing, invalid, or payload/timestamp-mismatched X-Webhook-Signature" },
-          "404": { "description": "order_id (from data.metadata.order_id) does not exist" }
-        }
-      }
-    },
-    "/webhook/aggregator": {
-      "post": {
-        "summary": "Payment callback for the active aggregator (DEFAULT_AGGREGATOR)",
-        "description": "Generic aggregator endpoint: routes to whichever provider DEFAULT_AGGREGATOR names (e.g. campay, smobilpay), verified with that provider's own secret and signature header from _PROVIDER_CONFIG (app/routes/webhooks.py). Same idempotency guarantee as /webhook/momo and /webhook/orange, keyed on (provider, external_transaction_id). Adding a new aggregator only means adding an entry to _PROVIDER_CONFIG -- not a new route.",
-        "security": [{ "aggregatorSignature": [] }],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": { "$ref": "#/components/schemas/AggregatorCallback" }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Processed, or already processed (idempotent replay)" },
-          "401": { "description": "Missing, invalid, or payload-mismatched signature for the active aggregator" },
+          "200": { "description": "Processed, already processed (idempotent replay), or a geniuspay webhook.test acknowledgement" },
+          "401": { "description": "Missing, invalid, or payload/timestamp-mismatched signature for the named provider" },
           "404": { "description": "order_id does not exist" },
-          "500": { "description": "DEFAULT_AGGREGATOR names a provider with no entry in _PROVIDER_CONFIG (misconfiguration)" }
+          "500": { "description": "provider names a value with no entry in _PROVIDER_CONFIG (misconfiguration)" }
         }
       }
     }

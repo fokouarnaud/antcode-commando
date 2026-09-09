@@ -5,17 +5,11 @@ def test_openapi_json_documents_webhook_and_order_lookup_paths(client):
     spec = response.get_json()
     assert spec["info"]["title"]
     assert set(spec["paths"]) == {
-        "/webhook/momo",
-        "/webhook/orange",
-        "/webhook/aggregator",
-        "/webhooks/geniuspay",
+        "/webhook/{provider}",
         "/orders",
         "/orders/{order_id}",
     }
-    assert "post" in spec["paths"]["/webhook/momo"]
-    assert "post" in spec["paths"]["/webhook/orange"]
-    assert "post" in spec["paths"]["/webhook/aggregator"]
-    assert "post" in spec["paths"]["/webhooks/geniuspay"]
+    assert "post" in spec["paths"]["/webhook/{provider}"]
     assert "get" in spec["paths"]["/orders"]
     assert "get" in spec["paths"]["/orders/{order_id}"]
 
