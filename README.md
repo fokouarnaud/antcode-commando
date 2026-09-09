@@ -93,7 +93,7 @@ app/
     └── webhooks.py                 # idempotent MoMo/Orange callback processing
 scripts/
 ├── generate_mock_transactions.py   # generates the messy CSV + loads ecommerce_orders_raw
-└── load_structured_orders.py       # runs the ETL against ecommerce.db
+└── load_structured_orders.py       # runs the ETL against data/ecommerce.db
 docs/
 └── indexing_and_query_optimization_report.md
 tests/
@@ -168,7 +168,7 @@ reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
 python -m pytest -v
 ```
 
-47 tests, 100% passing (`python -m pytest -v`). Every behavior above —
+48 tests, 100% passing (`python -m pytest -v`). Every behavior above —
 including the schema, the ETL, the dual-engine connection layer, the
 multi-provider/aggregator webhooks, and the paginated order lookup — was
 written test-first: a failing test proving the gap, then the minimal code
@@ -318,6 +318,7 @@ TDD red/green/refactor loop.
 | Phase 11: README overhaul | `/goal` | First full rewrite of this README: architecture diagram, project layout, AI Prompt Ledger (this table), Cameroonian-context pagination/dual-operator sections, roadmap | This document, largely as it now reads — committed as `3f0f16c` (bundled with Phase 10's still-uncommitted code, flagged to the user at the time) |
 | — | `/goal` ×2 | Fix a real Mermaid syntax bug this ledger's own diagram introduced (`provider="momo"` — double quotes inside a `\|...\|` edge label break GitHub's renderer) actually on lines 57-58, not the line number first guessed; then reformat the project-layout tree with box-drawing characters | `0d9ebc3`, `fc89f34` |
 | Phase 12: Aggregator toggle layer | `/goal` | Generic `POST /webhook/aggregator` routing to whichever provider `DEFAULT_AGGREGATOR` names, reusing the existing `_webhook(provider)`/`_PROVIDER_CONFIG` machinery from Phase 9; add `campay`/`smobilpay` config entries; guard against an unconfigured `DEFAULT_AGGREGATOR` value (500, not an unhandled exception) | 3 new tests (default-aggregator secret verification, secret swap on aggregator change, unknown-aggregator 500) — 47 tests passing |
+| Phase 13: Data directory cleanup | `/goal` | Move the SQLite database file from the repo root to `data/ecommerce.db` (`run.py`, both `scripts/`); make `scripts/generate_mock_transactions.py`'s `ensure_import_table()`/`insert_orders()` engine-aware via `format_query()` and an engine-picked `CREATE_TABLE_SQL`/`CREATE_TABLE_SQL_POSTGRES` pair instead of hardcoded sqlite DDL | 1 new test (postgres DDL branch, mocked connection) — 48 tests passing. `.gitignore`'s existing `*.db` pattern already covered the new path — verified with `git check-ignore`, no `.gitignore` edit needed. `scripts/load_structured_orders.py::main()` still queries `sqlite_master` directly (sqlite-only) — out of this phase's scope, flagged as a follow-up gap rather than silently left undocumented |
 
 Each `/goal` phase followed the same discipline: RED (failing test proving
 the gap) → GREEN (minimal code to close it) → REFACTOR (clean up without

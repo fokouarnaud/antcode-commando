@@ -8,7 +8,7 @@ CREATE INDEX idx_orders_neighborhood_status
 ```
 
 Defined in `app/database/schema_sqlite.sql`, created automatically by `init_db()`, and
-verified live in `ecommerce.db` via `PRAGMA index_list(orders)` and covered
+verified live in `data/ecommerce.db` via `PRAGMA index_list(orders)` and covered
 by `tests/test_database.py::test_init_db_creates_orders_neighborhood_status_index`.
 
 ## Why these two columns, in this order

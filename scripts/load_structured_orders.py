@@ -3,6 +3,7 @@ real project database (ecommerce.db), initializing the schema first if the
 structured tables don't exist yet.
 """
 
+import os
 import pathlib
 import sys
 
@@ -13,7 +14,9 @@ if str(REPO_ROOT) not in sys.path:
 from app.config.database import get_connection, init_db  # noqa: E402
 from app.services.pipeline import load_structured_data  # noqa: E402
 
-DB_PATH = REPO_ROOT / "ecommerce.db"
+DB_PATH = pathlib.Path(
+    os.environ.get("DATABASE_PATH", str(REPO_ROOT / "data" / "ecommerce.db"))
+)
 
 
 def main():

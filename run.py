@@ -12,7 +12,7 @@ import os
 from app import create_app
 
 app = create_app(
-    db_path=os.environ.get("DATABASE_PATH", "ecommerce.db"),
+    db_path=os.environ.get("DATABASE_PATH", "data/ecommerce.db"),
     webhook_secret=os.environ.get("MOMO_WEBHOOK_SECRET", "dev-secret-change-me"),
     orange_webhook_secret=os.environ.get("ORANGE_WEBHOOK_SECRET", "dev-secret-change-me"),
     campay_webhook_secret=os.environ.get("CAMPAY_WEBHOOK_SECRET", "dev-secret-change-me"),

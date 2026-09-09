@@ -49,3 +49,18 @@ def test_insert_orders_stores_cleaned_rows_in_database():
     ).fetchone()
     assert row["customer_neighborhood"] == "Akwa"
     assert row["unit_price_fcfa"] is None
+
+
+def test_ensure_import_table_uses_postgres_ddl_when_engine_is_postgresql(monkeypatch):
+    monkeypatch.setenv("DB_ENGINE", "postgresql")
+    calls = []
+
+    class FakeConn:
+        def execute(self, sql):
+            calls.append(sql)
+
+    ensure_import_table(FakeConn())
+
+    assert len(calls) == 1
+    assert "SERIAL PRIMARY KEY" in calls[0]
+    assert "AUTOINCREMENT" not in calls[0]

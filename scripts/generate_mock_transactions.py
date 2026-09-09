@@ -14,6 +14,7 @@ whitespace stripping and NaN -> NULL conversion decide what actually lands
 in the database.
 """
 
+import os
 import pathlib
 import random
 import sys
@@ -26,10 +27,12 @@ REPO_ROOT = pathlib.Path(__file__).parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.config.database import get_connection  # noqa: E402  (needs REPO_ROOT on sys.path first)
+from app.config.database import format_query, get_connection, get_engine  # noqa: E402
 
 CSV_PATH = REPO_ROOT / "data" / "ecommerce_orders_messy_data.csv"
-DB_PATH = REPO_ROOT / "ecommerce.db"
+DB_PATH = pathlib.Path(
+    os.environ.get("DATABASE_PATH", str(REPO_ROOT / "data" / "ecommerce.db"))
+)
 
 N_ROWS = 1000
 
@@ -58,6 +61,25 @@ COLUMNS = [
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS ecommerce_orders_raw (
     id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id                 TEXT,
+    customer_neighborhood    TEXT,
+    order_date               TEXT,
+    product_category         TEXT,
+    quantity                 INTEGER,
+    unit_price_fcfa          REAL,
+    payment_method           TEXT,
+    payment_status           TEXT,
+    delivery_status          TEXT,
+    delivery_date            TEXT,
+    delivery_duration_hours  REAL,
+    driver_id                TEXT,
+    distance_km              REAL
+)
+"""
+
+CREATE_TABLE_SQL_POSTGRES = """
+CREATE TABLE IF NOT EXISTS ecommerce_orders_raw (
+    id                       SERIAL PRIMARY KEY,
     order_id                 TEXT,
     customer_neighborhood    TEXT,
     order_date               TEXT,
@@ -186,13 +208,14 @@ def clean_row(row):
 
 
 def ensure_import_table(conn):
-    conn.execute(CREATE_TABLE_SQL)
+    sql = CREATE_TABLE_SQL_POSTGRES if get_engine() == "postgresql" else CREATE_TABLE_SQL
+    conn.execute(format_query(sql))
 
 
 def insert_orders(conn, rows):
     cleaned_rows = [clean_row(row) for row in rows]
     conn.executemany(
-        INSERT_SQL,
+        format_query(INSERT_SQL),
         [tuple(row[col] for col in COLUMNS) for row in cleaned_rows],
     )
     conn.commit()
