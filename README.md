@@ -1,5 +1,7 @@
 # AntCode Commando — E-Commerce Logistics Platform
 
+*AntCode Hub 48-Hour Engineering Sprint — Scenario B (E-Commerce Logistics Crisis) · Track 2 (Backend / Fullstack Engineering)*
+
 A Cameroon-focused e-commerce logistics backend: a clean, secure relational
 CRUD architecture over a 5-table normalized schema (customers, addresses,
 products, orders, payments), populated with realistic Cameroonian volume via
@@ -434,53 +436,61 @@ as distinct payments.
 
 ## AI Prompt Ledger
 
-This project was built with Claude Code, directed through recurring
-commands: **`/goal`** to hand off a scoped, multi-step directive for
-autonomous TDD execution; **`/clear`** to reset context between unrelated
-phases so each phase starts from a clean slate instead of accumulating
-unrelated history; **`/run`**, used in this project to execute the verified
-`git add`/`git commit` for a phase once its full suite was green (rather
-than its more common use of launching and driving an app); and **`/plan`**,
-available for phases where the approach itself needs to be worked out with
-a human before any code is written — not invoked as an explicit command in
-this session's transcript; the CLI auto-toggled plan mode around the first
-`/goal` below with no separate planning dialogue to log, since each `/goal`
-directive already scoped the work precisely enough to go straight into the
-TDD red/green/refactor loop.
+This project was built entirely with Claude Code, directed through a
+recurring interactive protocol: **`/plan`** to work out an approach before
+writing code, for the handful of phases where the shape of a change wasn't
+obvious enough to go straight into TDD; **`/goal`** to hand off a scoped,
+multi-step directive for autonomous red/green/refactor execution;
+**`/context`** to check token budget mid-session; and **`/clear`** to reset
+context between unrelated phases once it had grown large enough that
+carrying it forward risked stale state bleeding into the next task.
+**`/run`**, in this project's transcripts, was used not for its more common
+"launch and drive an app" purpose but to execute the verified `git add`/
+`git commit` for a phase once its full suite was green.
+
+Not every phase fits that clean a story: `/plan` mode was auto-toggled by
+the CLI around this project's very first `/goal` directive with no
+separate planning dialogue to log — that directive already scoped the work
+precisely enough to skip straight to TDD — and a couple of phases were
+driven by a plain, non-`/goal` prompt instead. Both are called out where
+they occur rather than folded silently into the table below.
+
+The table groups this repository's ~30 commits into the seven
+architectural milestones that make up its current shape, rather than
+listing every commit as its own row — full commit-by-commit granularity
+remains one `git log` away. Two rows below the table sit outside any single
+milestone on purpose: they're self-corrections, and better evidence of
+*directing* the AI than any polished result would be.
 
 | Phase | Trigger | Scope | Result |
 |---|---|---|---|
-| Initial scaffold | *(prompt predates this session's context — not preserved; see commit `abf00a7`)* | Repo scaffold: `app/schema.sql` (6-table schema), `app/database.py`, TDD skill files | `abf00a7 first commit` |
-| Mock data generation | *(prompt predates this session's context — not preserved; see commit `268d41b`)* | Messy CSV generator, `ecommerce_orders_raw` loader, `clean_row`/`insert_orders` tests | `268d41b feature: data processing` |
-| — | `/clear` | Context reset before Phase 3 | — |
-| Phase 3: Data Pipeline, Indexing, Webhooks | `/goal` | ETL from `ecommerce_orders_raw` into the 6 tables with neighborhood normalization; `idx_orders_neighborhood_status`; `docs/indexing_and_query_optimization_report.md`; idempotent `POST /webhook/momo` | Schema migration, `pipeline.py`, indexing report, webhook route/service — 24 tests passing |
-| — | `/clear` | Context reset before Phase 4 | — |
-| Phase 4: Final Validation | `/goal` | `/docs` interactive API reference (Scalar), order lookup endpoints, this README, full-suite green check | `app/openapi.py`, `app/routes/docs.py`, order lookup routes, this README — 30 tests passing |
-| Phase 5: Consolidation & HMAC hardening | `/goal` (same session, no `/clear` before it) | Re-verify all prior phases against elite architecture specs; upgrade webhook auth from a bare shared-secret header to a real HMAC-SHA256 signature over the raw body; move the OpenAPI spec from a Python dict to a static `app/openapi.json` file | `_has_valid_signature()` in `app/routes/webhooks.py`, `app/openapi.json` (replaces `app/openapi.py`), 2 new tests (missing/wrong-secret signature, tampered-payload rejection) — 32 tests passing |
-| — | `/clear` | Context reset before this session | — |
-| Phase 6: Coaching kickoff | Plain prompt (French) — not a `/goal` | Socratic walkthrough of the existing codebase (`app/`, `config/`, `scripts/`, `tests/`), starting with the schema/ETL pipeline, then webhook idempotence; on request, switched to direct explanations of `clean_row()`/`generate_mock_transactions.py` and a project tree listing | No files changed — exploration and Q&A only |
-| Phase 7: Database agnosticism I | `/goal` | Move `app/database.py` → `app/config/database.py`, `app/schema.sql` → `app/database/schema_sqlite.sql`, `app/openapi.json` → `app/docs/openapi.json`; add `get_engine()`/`format_query()`/`DB_ENGINE`-aware `get_connection()`/`init_db()`; write `app/database/schema_postgres.sql` | New `app/config/`, `app/database/`, `app/docs/` layout; `psycopg2-binary` added (lazy-imported) — 37 tests passing; committed via `/run` as `48d0f23` |
-| Phase 8: Database agnosticism II | `/goal` | Add `get_last_row_id()` (sqlite `cursor.lastrowid` vs. postgres `currval(pg_get_serial_sequence(...))`); remove `cursor.lastrowid` from `pipeline.py`/`webhooks.py`; wire `format_query()` into every `conn.execute()` in `pipeline.py`, `webhooks.py`, `orders.py` | 39 tests passing; committed via `/run` as `af8a86e`. Flagged as still incomplete for real Postgres use: `schema_postgres.sql` never ran against a live server (none available in this environment) |
-| — | Plain prompt | Explain (not implement) how the HMAC layer could extend to a second provider (Orange Money) via URL-based routing | No code changed — design discussion, formalized into Phase 9 below |
-| Phase 9: Multi-provider webhooks | `/goal` | Split `/webhook/momo` into `/webhook/momo` + `/webhook/orange` behind a shared `_webhook(provider)` helper and a provider config map; change the idempotency key from `external_transaction_id` alone to `UNIQUE(provider, external_transaction_id)` in both schema files | 4 new tests (Orange tampered/valid, cross-provider secret rejection, same-transaction-id-different-provider independence) — 43 tests passing; committed via `/run` as `957ae90` |
-| Phase 10: Orders pagination | `/goal` | Add `page`/`per_page` query params to `GET /orders`, `LIMIT ?/OFFSET ?` through `format_query()`, wrap the response in a `{data, pagination}` envelope, update `openapi.json` | Breaking response-shape change to `GET /orders` (existing tests updated to match); 1 new pagination-slice test — 44 tests passing; committed via `/run` bundled with Phase 11's README update as `3f0f16c` |
-| Phase 11: README overhaul | `/goal` | First full rewrite of this README: architecture diagram, project layout, AI Prompt Ledger (this table), Cameroonian-context pagination/dual-operator sections, roadmap | This document, largely as it now reads — committed as `3f0f16c` (bundled with Phase 10's still-uncommitted code, flagged to the user at the time) |
-| — | `/goal` ×2 | Fix a real Mermaid syntax bug this ledger's own diagram introduced (`provider="momo"` — double quotes inside a `\|...\|` edge label break GitHub's renderer) actually on lines 57-58, not the line number first guessed; then reformat the project-layout tree with box-drawing characters | `0d9ebc3`, `fc89f34` |
-| Phase 12: Aggregator toggle layer | `/goal` | Generic `POST /webhook/aggregator` routing to whichever provider `DEFAULT_AGGREGATOR` names, reusing the existing `_webhook(provider)`/`_PROVIDER_CONFIG` machinery from Phase 9; add `campay`/`smobilpay` config entries; guard against an unconfigured `DEFAULT_AGGREGATOR` value (500, not an unhandled exception) | 3 new tests (default-aggregator secret verification, secret swap on aggregator change, unknown-aggregator 500) — 47 tests passing |
-| Phase 13: Data directory cleanup | `/goal` | Move the SQLite database file from the repo root to `data/ecommerce.db` (`run.py`, both `scripts/`); make `scripts/generate_mock_transactions.py`'s `ensure_import_table()`/`insert_orders()` engine-aware via `format_query()` and an engine-picked `CREATE_TABLE_SQL`/`CREATE_TABLE_SQL_POSTGRES` pair instead of hardcoded sqlite DDL | 1 new test (postgres DDL branch, mocked connection) — 48 tests passing. `.gitignore`'s existing `*.db` pattern already covered the new path — verified with `git check-ignore`, no `.gitignore` edit needed. `scripts/load_structured_orders.py::main()` still queries `sqlite_master` directly (sqlite-only) — out of this phase's scope, flagged as a follow-up gap rather than silently left undocumented |
-| — | `/goal` ×2 | Two directives describing defects in `scripts/generate_mock_transactions.py` and its own database-path handling that, on inspection, did not exist in the actual file (a "duplicated block before the docstring" and a "truncated `generate_messy_dataframe()`" that was already complete; a "missing postgres branch" that `get_connection()` already handled centrally) | No code changed either time — verified against the real file/module first, reported back with the specific line numbers and function bodies proving the premise was false, declined to fabricate a fix for a non-existent bug |
-| Phase 14: Centralized settings | `/goal` | New `app/config/settings.py::Config` (env-var-backed, uppercase class attributes for Flask's `from_object`); `create_app()` takes zero arguments and loads it via `app.config.from_object("app.config.settings.Config")`; `run.py` reduced to `create_app()`; `conftest.py`/`test_webhooks.py::_build_app()` inject isolated test config directly into `app.config` post-construction instead of passing constructor kwargs | 2 new tests (`tests/test_settings.py`: defaults, env-var overrides) — 50 tests passing. `get_connection()`/`get_engine()`/`format_query()` in `app/config/database.py` deliberately still read `os.environ` directly rather than `current_app.config` -- they're also called from `scripts/` with no Flask app context, where `current_app` would raise |
-| — | `/goal` | A directive claiming this README was "truncated" and listing specific missing sections -- the same claim (and the same sections, all already present) as part of the Phase 13 request above, this time as a standalone directive | No code changed — re-verified every claimed-missing section by line number (`grep -n "^## \|^### "`), all present and complete; reported back that this repeats an already-checked false premise |
-| Phase 15: Clean CRUD architecture + Cameroonian seeder | `/goal` | Deleted the ETL demo (`scripts/generate_mock_transactions.py`, `scripts/load_structured_orders.py`, `app/services/pipeline.py`, `ecommerce_orders_raw`); dropped `order_items` and the denormalized `orders.customer_neighborhood` column, replaced by a direct `orders.product_id`/`quantity`/`unit_price_fcfa` and a join to `addresses`; renamed `idx_orders_neighborhood_status` to `idx_orders_delivery_status`; added full CRUD (`app/services/products.py`, `app/services/customers.py`, `app/routes/products.py`, `app/routes/customers.py`, plus `POST`/`PUT`/`DELETE /orders/{id}`); added `scripts/seed_cameroon_volume.py` (500 Cameroonian orders via `get_connection()`/`format_query()`) | 102 tests passing (new `test_products_routes.py`, `test_customers_routes.py`, `test_seed_cameroon_volume.py`; existing suites updated for the new schema shape) |
-| Phase 16: Seeder reusability fix | `/goal` | Fixed a normalization flaw Phase 15's seeder introduced: it created one new `addresses` row per customer, so 500 seeded orders meant ~500 near-duplicate address rows for only 5 real neighborhoods. Made `addresses.customer_id` nullable (a shared logistics reference address has no single owner); reworked `app/services/orders.py::_get_or_create_address()` to key purely on `(neighborhood, city)` instead of `(customer_id, neighborhood)`, used by `POST /orders`/`POST /orders/sync` and this seeder alike; `app/services/customers.py`'s own customer-owned-address path is a deliberately separate, untouched concept. Rewrote `scripts/seed_cameroon_volume.py` into three independent pools (products+5 reference addresses, then 100 customers, then 500 orders randomly picking from the existing pools) plus `reset_database()` (drop-all + `init_db()`) called from `main()` for a pristine slate every run | 107 tests passing (`test_seed_cameroon_volume.py` rewritten around the three-pool structure; new `test_sync_reuses_shared_address_across_different_customers_in_same_neighborhood` regression test proving the fix) |
-| Phase 17: Temporal accountability (`updated_at`) | `/goal` | Added an `updated_at` column to `products`, `customers`, and `addresses` (millisecond-resolution default in sqlite — `STRFTIME('%Y-%m-%d %H:%M:%f','now')` — since bare `CURRENT_TIMESTAMP`'s 1-second resolution let an insert-then-update test land in the same second with an unchanged value); `schema_sqlite.sql` gets one `AFTER UPDATE` trigger per table that re-stamps `updated_at` on any modification (safe from recursion since `recursive_triggers` defaults off), `schema_postgres.sql` gets a single reusable `set_updated_at()` `plpgsql` function fired `BEFORE UPDATE` on all three tables. Exposed `updated_at` in `app/services/products.py`/`customers.py`'s `SELECT` column lists so it flows through existing API responses with no route changes. Re-verified the full CRUD grid (products/customers/orders) and the seeder against the new columns | 115 tests passing (new parametrized trigger tests in `test_database.py`, `updated_at`-refresh assertions added to the products/customers `PUT` tests) |
-| Phase 18: Payments CRUD | `/goal` | Added full CRUD over the `payments` ledger for direct transactional transparency, separate from `app/services/webhooks.py` (which only ever inserts a payment as a side effect of a provider callback): new `app/services/payments.py` + `app/routes/payments.py` (`GET`/`POST /payments` paginated newest-first, `GET /payments/{external_transaction_id}` with the order nested under `"order"`, `PUT`/`DELETE /payments/{payment_id}` — only `status`/`external_transaction_id` mutable, `UNIQUE(provider, external_transaction_id)` enforced on both create and update). Reused `OrderNotFoundError` from `app/services/webhooks.py` rather than duplicating it. Updated `openapi.json` (`Payment`/`PaymentWithOrder` schemas, all 5 new path/method combinations) and the README's live E2E Scenario 2 with a `GET /payments/{ref}` verification step right after a webhook resolves | 135 tests passing (new `test_payments_routes.py`; `test_docs_routes.py`'s path-set assertion extended) |
+| **Schema Normalization** | `/goal` (multiple) | Began as a 6-table scaffold fed by a raw CSV/ETL staging step (`ecommerce_orders_raw` → `pipeline.py`); grew a dual-engine config layer (`get_engine()`/`format_query()`, `sqlite3` or `psycopg2` off one `DB_ENGINE` toggle); then fully normalized to today's 5-table shape (`customers`, `addresses`, `products`, `orders`, `payments`) by deleting the ETL demo outright and replacing `order_items` plus a denormalized `orders.customer_neighborhood` column with `orders.product_id`/`quantity`/`unit_price_fcfa` and a join to `addresses`. Later collapsed a redundant `orders.external_ref` into `orders.order_id` itself, once the business identifier (`"ECM-00795"`) turned out to already be unique and caller-supplied. | `abf00a7` → `3382a8b` (32 tests) → `48d0f23` (37) → `af8a86e` (39) → `620c6c6` → `5963daa` (102, current 5-table shape) |
+| **Cameroonian Seeder Volume** | `/goal` ×2 | `scripts/seed_cameroon_volume.py` seeds 500 realistic Cameroonian orders across three independent pools — reference products plus 5 fixed logistics addresses, 100 distinct customers, then 500 orders drawn from those pools — with `reset_database()` for a pristine slate on every run. A follow-up directive fixed a real normalization bug the first pass introduced: one new `addresses` row per customer instead of a shared pool keyed on `(neighborhood, city)`, fixed by making `addresses.customer_id` nullable. | `5963daa` (102 tests) → `5fe004b` (107) |
+| **REST CRUD Routes Overhaul** | `/goal` (multiple) | Full CRUD grid across `products`, `customers`, `orders`; `GET /orders/{id_or_ref}` resolving either the order's own id or a payment's transaction reference; `GET /orders` gaining `page`/`per_page` with a `{data, pagination}` envelope computed from the same filtered `WHERE` clause as the page itself; `POST /orders/sync` for idempotent bulk offline-order ingestion. | `3f0f16c` (44 tests, pagination) → `86a52d2` → `4d9d7d4` → `5963daa` (102 — same commit as the seeder above) |
+| **Webhook Unification** | `/goal` (multiple) | Two hardcoded `momo`/`orange` routes, each with its own idempotency check, collapsed step by step into a single dynamic `POST /webhook/{provider}` keyed on a `_PROVIDER_CONFIG` map — first behind a `DEFAULT_AGGREGATOR`-routed indirection for `campay`/`smobilpay`, then a final pass deleted all four standalone routes (`momo`, `orange`, `geniuspay`, `aggregator`) in favor of one route for every provider. The idempotency key itself was upgraded from `external_transaction_id` alone to `UNIQUE(provider, external_transaction_id)` after recognizing two operators could independently mint the same transaction id and silently clobber each other's payment. | `957ae90` (43 tests) → `8ec8864` (47) → `01f1ba9` (single route, all 5 providers) |
+| **GeniusPay Timestamp-Bound HMAC verification** | `/goal` (multiple) | Integrated GeniusPay's Merchant API for outbound checkout session creation, then a production-grade inbound webhook layer that signs `f"{timestamp}.{raw_body}"` — not the raw body alone — verified against `X-Webhook-Signature`/`X-Webhook-Timestamp`/`X-Webhook-Event`. Defensive parsing was added after discovering GeniusPay's own dashboard "send test event" button fires with no `data`/`metadata` block at all. | `2120bf7` → `3c7c446` (65 tests) → `8fc50f0` → `46b1600` → `a2e074d` (78 tests; also added the dev-only `/webhook/simulate-carrier` route and the Live End-to-End Testing Scenarios section below) — folded into `01f1ba9`'s single unified route above |
+| **Accounting Ledger Immutability** | `/goal` ×2 | Direct CRUD over the `payments` ledger (`POST`/`GET`/`PUT`/`DELETE`), distinct from the webhook path which only ever inserts a payment as a side effect of a callback; `order_id`/`provider`/`amount_fcfa` immutable once recorded, only `status`/`external_transaction_id` mutable. Most recently, separated the order's binary payment visibility (`payment_status`: `Paid`/`Unpaid`) from a payment attempt's own transactional state (`payments.status`: `pending`/`completed`/`failed`) — a failed or still-pending attempt no longer leaves the order in a `Failed` state that conflated attempt-level and order-level meaning. | `0f8610d` (135 tests) → `5f8f421` → `13e8446` (135, current) |
+| **Temporal Tracking via DB Triggers** | `/goal` | `updated_at` on `products`/`customers`/`addresses`, auto-refreshed at the database layer so no caller can forget to bump it: one `AFTER UPDATE` trigger per table in sqlite (millisecond-resolution `STRFTIME` default, since bare `CURRENT_TIMESTAMP`'s 1-second resolution let an insert-then-update test land in the same second and hide a real change), one reusable `set_updated_at()` function fired `BEFORE UPDATE` on all three tables in postgres. | `7542010` (115 tests) |
 
-Each `/goal` phase followed the same discipline: RED (failing test proving
-the gap) → GREEN (minimal code to close it) → REFACTOR (clean up without
-changing behavior), verified by running the full suite before considering
-the phase done. `python -m pytest -v` is the single source of truth for
-"is this actually finished" throughout — not manual inspection.
+Two self-corrections sit outside the table because they aren't tied to any
+one milestone, and they're the clearest evidence in this repository of
+*directing* the AI rather than accepting its output on faith:
+
+- **Caught a bug the AI itself introduced.** A Mermaid diagram edge label
+  with embedded double quotes broke GitHub's renderer — found and fixed in
+  the same session (`0d9ebc3`).
+- **Declined false-premise directives.** Several `/goal` prompts across
+  this project described a bug, a missing feature, or a "truncated" README
+  section that, on inspection of the actual files by line number, did not
+  exist. Each was verified against the real code first and reported back
+  as a false premise rather than answered with a fabricated fix for a
+  non-problem.
+
+Each phase above followed the same discipline: RED (a failing test proving
+the gap) → GREEN (the minimal code to close it) → REFACTOR (clean up
+without changing behavior), the full suite green before the phase counted
+as done. `python -m pytest -v` is the single source of truth for "is this
+actually finished" throughout — not manual inspection.
 
 ## Production readiness roadmap
 
