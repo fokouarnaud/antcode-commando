@@ -147,9 +147,11 @@ Every provider works the same way — swap the URL segment and its matching
 secret env var: `/webhook/momo` + `MOMO_WEBHOOK_SECRET`, `/webhook/orange` +
 `ORANGE_WEBHOOK_SECRET`, `/webhook/smobilpay` + `SMOBILPAY_WEBHOOK_SECRET`,
 or `/webhook/geniuspay` + `GENIUSPAY_WEBHOOK_SECRET` (which additionally
-requires an `X-GeniusPay-Event` header; GeniusPay signs the raw request
-body alone, same as every other provider). A `provider` segment with no
-entry in `_PROVIDER_CONFIG` returns 500.
+requires `X-Webhook-Timestamp` and `X-Webhook-Event` headers, since
+GeniusPay signs `f"{timestamp}.{raw_body}"` rather than the raw body
+alone -- verified directly against a captured sandbox webhook, not just
+GeniusPay's own written docs, which describe this differently). A
+`provider` segment with no entry in `_PROVIDER_CONFIG` returns 500.
 
 Then open **http://127.0.0.1:5000/docs** for the interactive Scalar API
 reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
@@ -178,7 +180,7 @@ reference, or **http://127.0.0.1:5000/openapi.json** for the raw spec.
 | `/payments/{external_transaction_id}` | GET | Fetches a payment's full details with its order nested under `"order"`. 404 if no payment matches |
 | `/payments/{payment_id}` | PUT | Updates `status` and/or `external_transaction_id` only — `order_id`/`provider`/`amount_fcfa` are immutable. 400 on invalid status, 404 if unknown, 409 on a reference collision |
 | `/payments/{payment_id}` | DELETE | Deletes a payment log entry. 404 if unknown |
-| `/webhook/{provider}` | POST | Payment callback for the named provider (`momo`, `orange`, `campay`, `smobilpay`, `geniuspay`). Requires that provider's own signature header (e.g. `X-Momo-Signature`, `X-Campay-Signature`, or `X-GeniusPay-Signature` + `X-GeniusPay-Event` for `geniuspay`) keyed with its own secret, resolved dynamically from `_PROVIDER_CONFIG`. Idempotent on `(provider, external_transaction_id)`; an unrecognized `provider` returns 500 |
+| `/webhook/{provider}` | POST | Payment callback for the named provider (`momo`, `orange`, `campay`, `smobilpay`, `geniuspay`). Requires that provider's own signature header (e.g. `X-Momo-Signature`, `X-Campay-Signature`, or `X-Webhook-Signature` + `X-Webhook-Timestamp` + `X-Webhook-Event` for `geniuspay`) keyed with its own secret, resolved dynamically from `_PROVIDER_CONFIG`. Idempotent on `(provider, external_transaction_id)`; an unrecognized `provider` returns 500 |
 | `/webhook/simulate-carrier` | POST | **Dev-only** (404s unless the app runs with `debug=True`): bypasses signature verification entirely to fire a `momo`/`orange` callback straight from the Scalar UI, for demoing the payment lifecycle without hand-computing an HMAC. Never enable `debug` in production |
 | `/docs` | GET | Interactive Scalar API reference — try all endpoints above from the browser |
 | `/openapi.json` | GET | OpenAPI 3.0 spec backing `/docs` (`app/docs/openapi.json`) |
@@ -218,18 +220,18 @@ keys to see an actual `checkout_url` come back.
 
 #### Scenario 2 — Async Webhook Ingestion
 
-**Option A — GeniusPay's real signature scheme.** GeniusPay signs the raw
-request body alone (same as every other provider), so compute the
-signature before sending:
+**Option A — GeniusPay's real signature scheme.** GeniusPay signs
+`f"{timestamp}.{raw_body}"`, so compute the signature before sending:
 
 ```bash
 python3 - <<'PY'
-import hashlib, hmac, json
+import hashlib, hmac, json, time
 
 secret = "dev-secret-change-me"  # your GENIUSPAY_WEBHOOK_SECRET
-body = json.dumps({"data": {"transaction": {"reference": "GPAY-DEMO-01", "amount": 12000, "metadata": {"order_id": 1}}}})
-signature = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
-print(f'curl -X POST http://127.0.0.1:5000/webhook/geniuspay \\\n  -H "X-GeniusPay-Signature: {signature}" \\\n  -H "X-GeniusPay-Event: payment.success" \\\n  -H "Content-Type: application/json" \\\n  -d \'{body}\'')
+timestamp = str(int(time.time()))
+body = json.dumps({"data": {"reference": "GPAY-DEMO-01", "amount": 12000, "metadata": {"order_id": 1}}})
+signature = hmac.new(secret.encode(), f"{timestamp}.{body}".encode(), hashlib.sha256).hexdigest()
+print(f'curl -X POST http://127.0.0.1:5000/webhook/geniuspay \\\n  -H "X-Webhook-Signature: {signature}" \\\n  -H "X-Webhook-Timestamp: {timestamp}" \\\n  -H "X-Webhook-Event: payment.success" \\\n  -H "Content-Type: application/json" \\\n  -d \'{body}\'')
 PY
 ```
 

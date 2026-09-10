@@ -27,8 +27,9 @@ _PROVIDER_CONFIG = {
     },
     "geniuspay": {
         "secret_key": "GENIUSPAY_WEBHOOK_SECRET",
-        "signature_header": "X-GeniusPay-Signature",
-        "event_header": "X-GeniusPay-Event",
+        "signature_header": "X-Webhook-Signature",
+        "timestamp_header": "X-Webhook-Timestamp",
+        "event_header": "X-Webhook-Event",
     },
 }
 
@@ -40,6 +41,21 @@ def _has_valid_signature(secret, message, signature):
     return hmac.compare_digest(expected, signature)
 
 
+def _signed_message(config):
+    """Builds the exact byte string each provider signs. GeniusPay prepends
+    f"{timestamp}." ahead of the raw body; every other provider signs the
+    raw body alone. Verified directly against a live GeniusPay sandbox
+    webhook capture -- recomputing HMAC-SHA256 over
+    f"{timestamp}.{raw_body}" with GENIUSPAY_WEBHOOK_SECRET reproduces the
+    X-Webhook-Signature GeniusPay actually sent, byte for byte.
+    """
+    raw_body_string = request.get_data(as_text=True)
+    if "timestamp_header" in config:
+        timestamp = request.headers.get(config["timestamp_header"], "")
+        return f"{timestamp}.{raw_body_string}".encode()
+    return raw_body_string.encode()
+
+
 def _webhook(provider):
     config = _PROVIDER_CONFIG.get(provider)
     if config is None:
@@ -47,8 +63,9 @@ def _webhook(provider):
 
     secret = current_app.config[config["secret_key"]]
     signature = request.headers.get(config["signature_header"], "")
+    message = _signed_message(config)
 
-    if not _has_valid_signature(secret, request.get_data(), signature):
+    if not _has_valid_signature(secret, message, signature):
         return jsonify({"error": "invalid signature"}), 401
 
     payload = request.get_json(silent=True) or {}
@@ -70,10 +87,9 @@ def provider_webhook(provider):
     """Single dynamic entry point for every provider's payment callback --
     the provider name comes straight from the URL and is handed to
     _webhook(), which resolves that provider's own secret, signature
-    header, and (for GeniusPay) event header from _PROVIDER_CONFIG. Every
-    provider, GeniusPay included, signs the raw request body alone.
-    Adding a new provider only means adding an entry to _PROVIDER_CONFIG --
-    no new route or view function.
+    header, and (for GeniusPay) timestamp/event headers from
+    _PROVIDER_CONFIG. Adding a new provider only means adding an entry to
+    _PROVIDER_CONFIG -- no new route or view function.
     """
     return _webhook(provider)
 

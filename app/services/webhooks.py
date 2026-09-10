@@ -29,26 +29,37 @@ _GENIUSPAY_EVENT_STATUS = {
 }
 
 
+def _coerce_amount_fcfa(amount):
+    """GeniusPay's sandbox sends amount as a decimal string (e.g.
+    "285000.00", verified against a real webhook capture) rather than a
+    plain integer -- amount_fcfa is an INTEGER column, and while SQLite's
+    loose type affinity tolerates the string, Postgres does not, so this
+    normalizes it explicitly before it ever reaches a query.
+    """
+    if amount is None:
+        return None
+    return int(float(amount))
+
+
 def _extract_fields(payload):
-    """GeniusPay nests everything under data.transaction(.metadata) and
-    signals outcome via the X-GeniusPay-Event header (mirrored into
-    payload["event"] by the route) rather than a flat status field like the
-    other providers.
+    """GeniusPay nests everything flat under data and signals outcome via
+    the X-Webhook-Event header (mirrored into payload["event"] by the
+    route) rather than a flat status field like the other providers.
+    Verified directly against a live GeniusPay sandbox webhook capture.
 
     GeniusPay's dashboard "send test event" button (event webhook.test)
-    fires with no data/transaction block at all, so every lookup here is
-    defensive: order_id falls back to None rather than raising KeyError,
-    and process_momo_callback() short-circuits on that event before it
-    would otherwise be treated as a malformed real payment.
+    fires with no data block at all, so every lookup here is defensive:
+    order_id falls back to None rather than raising KeyError, and
+    process_momo_callback() short-circuits on that event before it would
+    otherwise be treated as a malformed real payment.
     """
     if payload.get("provider") == "geniuspay":
         data = payload.get("data") or {}
-        transaction = data.get("transaction") or {}
-        metadata = transaction.get("metadata") or {}
+        metadata = data.get("metadata") or {}
         return (
             metadata.get("order_id"),
-            transaction.get("reference"),
-            transaction.get("amount"),
+            data.get("reference"),
+            _coerce_amount_fcfa(data.get("amount")),
             _GENIUSPAY_EVENT_STATUS.get(payload.get("event"), "PENDING"),
         )
     return (

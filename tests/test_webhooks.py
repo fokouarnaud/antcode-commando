@@ -288,35 +288,41 @@ def test_webhook_route_returns_500_for_unknown_provider(client):
 
 
 def geniuspay_payload(order_id="ECM-00001", transaction_id="GENIUSPAY-TX-0001", amount=12000):
+    """Flat data shape (reference/amount/metadata directly under data),
+    verified against a real captured GeniusPay sandbox webhook -- not the
+    data.transaction.* nesting the written API doc's webhook example
+    (incorrectly) showed.
+    """
     return {
         "data": {
-            "transaction": {
-                "reference": transaction_id,
-                "amount": amount,
-                "metadata": {"order_id": order_id},
-            },
+            "reference": transaction_id,
+            "amount": amount,
+            "metadata": {"order_id": order_id},
         },
     }
 
 
-def sign_geniuspay(secret, raw_body_string):
-    """GeniusPay signs the raw request body alone -- same scheme as every
-    other provider, no timestamp involved (per GeniusPay's own API docs).
+def sign_geniuspay(secret, timestamp, raw_body_string):
+    """GeniusPay signs f"{timestamp}.{raw_body}" -- verified by recomputing
+    this HMAC against a real captured sandbox webhook and matching the
+    X-Webhook-Signature it actually sent, byte for byte.
     """
-    return hmac.new(secret.encode(), raw_body_string.encode(), hashlib.sha256).hexdigest()
+    message = f"{timestamp}.{raw_body_string}".encode()
+    return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
 
 
-def post_geniuspay(client, secret, payload, event="payment.success", signature=None):
+def post_geniuspay(client, secret, payload, event="payment.success", timestamp="1700000000", signature=None):
     raw_body_string = json.dumps(payload)
     if signature is None:
-        signature = sign_geniuspay(secret, raw_body_string)
+        signature = sign_geniuspay(secret, timestamp, raw_body_string)
     return client.post(
         "/webhook/geniuspay",
         data=raw_body_string.encode(),
         content_type="application/json",
         headers={
-            "X-GeniusPay-Signature": signature,
-            "X-GeniusPay-Event": event,
+            "X-Webhook-Signature": signature,
+            "X-Webhook-Timestamp": timestamp,
+            "X-Webhook-Event": event,
         },
     )
 
@@ -328,16 +334,20 @@ def test_geniuspay_webhook_rejects_request_with_missing_signature(client, app):
         "/webhook/geniuspay",
         data=raw_body_string.encode(),
         content_type="application/json",
-        headers={"X-GeniusPay-Event": "payment.success"},
+        headers={"X-Webhook-Timestamp": "1700000000", "X-Webhook-Event": "payment.success"},
     )
 
     assert response.status_code == 401
 
 
 def test_geniuspay_webhook_rejects_tampered_body_even_with_valid_looking_signature(client, app):
+    """The signed message is f"{timestamp}.{raw_body}" -- proves the body,
+    not just the timestamp, is covered by the signature.
+    """
     secret = app.config["GENIUSPAY_WEBHOOK_SECRET"]
+    timestamp = "1700000000"
     original_body = json.dumps(geniuspay_payload(amount=12000))
-    signature = sign_geniuspay(secret, original_body)
+    signature = sign_geniuspay(secret, timestamp, original_body)
     tampered_body = json.dumps(geniuspay_payload(amount=999999999))
 
     response = client.post(
@@ -345,32 +355,47 @@ def test_geniuspay_webhook_rejects_tampered_body_even_with_valid_looking_signatu
         data=tampered_body.encode(),
         content_type="application/json",
         headers={
-            "X-GeniusPay-Signature": signature,
-            "X-GeniusPay-Event": "payment.success",
+            "X-Webhook-Signature": signature,
+            "X-Webhook-Timestamp": timestamp,
+            "X-Webhook-Event": "payment.success",
         },
     )
 
     assert response.status_code == 401
 
 
-def test_geniuspay_webhook_accepts_request_with_no_timestamp_header(client, app):
-    """GeniusPay's HMAC covers the raw body only, not a timestamp -- the
-    X-GeniusPay-Timestamp header (when a caller sends it) is informational
-    and must not be required or checked for verification purposes.
+def test_geniuspay_webhook_rejects_mismatched_timestamp_even_with_valid_body_signature(client, app):
+    """The timestamp is part of the signed message too -- replaying a valid
+    body+signature pair under a different X-Webhook-Timestamp must fail.
     """
     secret = app.config["GENIUSPAY_WEBHOOK_SECRET"]
     payload = geniuspay_payload()
     raw_body_string = json.dumps(payload)
-    signature = sign_geniuspay(secret, raw_body_string)
+    signature = sign_geniuspay(secret, "1700000000", raw_body_string)
 
-    response = client.post(
-        "/webhook/geniuspay",
-        data=raw_body_string.encode(),
-        content_type="application/json",
-        headers={"X-GeniusPay-Signature": signature, "X-GeniusPay-Event": "payment.success"},
+    response = post_geniuspay(
+        client, secret, payload, timestamp="1700000999", signature=signature
     )
 
+    assert response.status_code == 401
+
+
+def test_geniuspay_webhook_coerces_decimal_string_amount(client, app):
+    """GeniusPay's sandbox sends amount as a decimal string (e.g.
+    "285000.00"), verified against a real webhook capture -- it must land
+    in amount_fcfa as a plain integer, not the raw string.
+    """
+    secret = app.config["GENIUSPAY_WEBHOOK_SECRET"]
+    payload = geniuspay_payload(transaction_id="GENIUSPAY-TX-DECIMAL", amount="285000.00")
+
+    response = post_geniuspay(client, secret, payload)
+
     assert response.status_code == 200
+    conn = get_connection(app.config["DATABASE_PATH"])
+    payment = conn.execute(
+        "SELECT amount_fcfa FROM payments WHERE external_transaction_id = 'GENIUSPAY-TX-DECIMAL'"
+    ).fetchone()
+    assert payment["amount_fcfa"] == 285000
 
 
 def test_geniuspay_webhook_processes_payment_success_event_and_marks_order_paid(client, app):
