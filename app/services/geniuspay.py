@@ -52,9 +52,12 @@ def initiate_geniuspay_payment(order_id, amount_fcfa, customer_phone=None, custo
         raise GeniusPayError("GeniusPay payment initiation failed")
 
     body = response.json()
-    checkout_url = body.get("checkout_url")
+    checkout_url = body.get("checkout_url") or body.get("payment_url")
     if not checkout_url:
-        logger.error("GeniusPay response missing checkout_url for order %s", order_id)
+        logger.error(
+            "GeniusPay response missing checkout_url/payment_url for order %s: %s",
+            order_id, response.text,
+        )
         raise GeniusPayError("GeniusPay payment initiation failed")
 
     return {

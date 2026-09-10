@@ -81,10 +81,51 @@ def test_initiate_geniuspay_payment_raises_on_non_201_status(mock_post, app_cont
 
 @patch("requests.post")
 def test_initiate_geniuspay_payment_raises_when_checkout_url_missing(mock_post, app_context):
-    mock_post.return_value = Mock(status_code=201, json=Mock(return_value={}))
+    mock_post.return_value = Mock(status_code=201, json=Mock(return_value={}), text="{}")
 
     with pytest.raises(GeniusPayError):
         initiate_geniuspay_payment(42, 15000)
+
+
+@patch("requests.post")
+def test_initiate_geniuspay_payment_falls_back_to_payment_url_when_checkout_url_missing(
+    mock_post, app_context
+):
+    """Some GeniusPay payment methods return `payment_url` instead of
+    `checkout_url` -- both must resolve to the same result field.
+    """
+    mock_post.return_value = Mock(
+        status_code=201,
+        json=Mock(return_value={
+            "payment_url": "https://geniuspay.ci/pay/via-payment-url",
+            "reference": "GPAY-REF-002",
+        }),
+    )
+
+    result = initiate_geniuspay_payment(42, 15000)
+
+    assert result == {
+        "checkout_url": "https://geniuspay.ci/pay/via-payment-url",
+        "transaction_reference": "GPAY-REF-002",
+    }
+
+
+@patch("requests.post")
+def test_initiate_geniuspay_payment_prefers_checkout_url_over_payment_url_when_both_present(
+    mock_post, app_context
+):
+    mock_post.return_value = Mock(
+        status_code=201,
+        json=Mock(return_value={
+            "checkout_url": "https://geniuspay.ci/pay/checkout",
+            "payment_url": "https://geniuspay.ci/pay/payment",
+            "reference": "GPAY-REF-003",
+        }),
+    )
+
+    result = initiate_geniuspay_payment(42, 15000)
+
+    assert result["checkout_url"] == "https://geniuspay.ci/pay/checkout"
 
 
 @patch("requests.post")
