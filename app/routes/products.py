@@ -18,8 +18,8 @@ products_bp = Blueprint("products", __name__)
 
 @products_bp.route("/products", methods=["GET"])
 def product_list():
-    page = max(request.args.get("page", default=1, type=int) or 1, 1)
-    per_page = max(request.args.get("per_page", default=20, type=int) or 20, 1)
+    page = max(request.args.get("page", default=1, type=int), 1)
+    per_page = min(max(request.args.get("per_page", default=20, type=int), 1), 100)
 
     products, total_records = list_products(get_db(), page=page, per_page=per_page)
 

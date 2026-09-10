@@ -19,8 +19,8 @@ payments_bp = Blueprint("payments", __name__)
 
 @payments_bp.route("/payments", methods=["GET"])
 def payment_list():
-    page = max(request.args.get("page", default=1, type=int) or 1, 1)
-    per_page = max(request.args.get("per_page", default=20, type=int) or 20, 1)
+    page = max(request.args.get("page", default=1, type=int), 1)
+    per_page = min(max(request.args.get("per_page", default=20, type=int), 1), 100)
 
     payments, total_records = list_payments(get_db(), page=page, per_page=per_page)
 

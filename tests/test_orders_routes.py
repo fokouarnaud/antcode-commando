@@ -87,6 +87,64 @@ def test_list_orders_paginates_to_second_page(client):
     }
 
 
+def _seed_extra_orders(app, count, start_at=3):
+    """Inserts `count` additional orders (ECM-000{start_at}..) against the
+    customer/address/product conftest already seeded, so pagination tests
+    can exercise per_page values above the base 2 orders.
+    """
+    conn = get_connection(app.config["DATABASE_PATH"])
+    for i in range(start_at, start_at + count):
+        conn.execute(
+            "INSERT INTO orders (order_id, customer_id, address_id, product_id, quantity, "
+            "unit_price_fcfa, delivery_status, payment_status) "
+            "VALUES (?, 1, 1, 1, 1, 75000, 'Pending', 'Unpaid')",
+            (f"ECM-{i:05d}",),
+        )
+    conn.commit()
+
+
+def test_list_orders_respects_explicit_per_page_of_five(client, app):
+    """Regression test: per_page must be honored as given, not silently
+    replaced by the default of 20.
+    """
+    _seed_extra_orders(app, count=4)  # 2 seeded + 4 = 6 total orders
+
+    response = client.get("/orders?page=1&per_page=5")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert len(body["data"]) == 5
+    assert body["pagination"] == {
+        "page": 1,
+        "per_page": 5,
+        "total_records": 6,
+        "total_pages": 2,
+    }
+
+
+def test_list_orders_per_page_zero_is_clamped_to_one_not_reset_to_default(client):
+    """per_page=0 must be clamped to the minimum of 1, not silently swapped
+    for the default of 20 (the falsy-zero `x or default` bug).
+    """
+    response = client.get("/orders?per_page=0")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert len(body["data"]) == 1
+    assert body["pagination"]["per_page"] == 1
+
+
+def test_list_orders_per_page_above_max_is_clamped_to_one_hundred(client, app):
+    _seed_extra_orders(app, count=150)  # 2 seeded + 150 = 152 total orders
+
+    response = client.get("/orders?per_page=500")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert len(body["data"]) == 100
+    assert body["pagination"]["per_page"] == 100
+
+
 @patch("app.routes.orders.initiate_geniuspay_payment")
 def test_checkout_returns_checkout_url_and_transaction_reference_on_success(mock_initiate, client):
     mock_initiate.return_value = {

@@ -103,6 +103,40 @@ def test_list_payments_orders_newest_first_and_paginates(client, app):
     assert payment_ids[0] == max(payment_ids)
 
 
+def test_list_payments_respects_explicit_per_page_of_five(client, app):
+    """Regression test: per_page must be honored as given, not silently
+    replaced by the default of 20.
+    """
+    for i in range(6):
+        create_payment(client, external_transaction_id=f"MTX-{i}")
+
+    response = client.get("/payments?page=1&per_page=5")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert len(body["data"]) == 5
+    assert body["pagination"] == {
+        "page": 1,
+        "per_page": 5,
+        "total_records": 6,
+        "total_pages": 2,
+    }
+
+
+def test_list_payments_per_page_zero_is_clamped_to_one_not_reset_to_default(client):
+    """per_page=0 must be clamped to the minimum of 1, not silently swapped
+    for the default of 20 (the falsy-zero `x or default` bug).
+    """
+    create_payment(client)
+
+    response = client.get("/payments?per_page=0")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert len(body["data"]) == 1
+    assert body["pagination"]["per_page"] == 1
+
+
 def test_get_payment_by_transaction_id_returns_nested_order_details(client):
     create_payment(client)
 

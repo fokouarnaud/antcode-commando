@@ -48,6 +48,41 @@ def test_list_products_paginates(client):
     assert body["pagination"]["total_pages"] == 2
 
 
+def test_list_products_respects_explicit_per_page_of_five(client):
+    """Regression test: per_page must be honored as given, not silently
+    replaced by the default of 20.
+    """
+    for i in range(5):
+        client.post("/products", json={
+            "name": f"Item {i}", "category": "Fashion", "unit_price_fcfa": 5000,
+        })
+    # conftest already seeds one product, plus the 5 created above = 6 total.
+
+    response = client.get("/products?page=1&per_page=5")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert len(body["data"]) == 5
+    assert body["pagination"] == {
+        "page": 1,
+        "per_page": 5,
+        "total_records": 6,
+        "total_pages": 2,
+    }
+
+
+def test_list_products_per_page_zero_is_clamped_to_one_not_reset_to_default(client):
+    """per_page=0 must be clamped to the minimum of 1, not silently swapped
+    for the default of 20 (the falsy-zero `x or default` bug).
+    """
+    response = client.get("/products?per_page=0")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert len(body["data"]) == 1
+    assert body["pagination"]["per_page"] == 1
+
+
 def test_update_product_changes_fields(client):
     created = client.post("/products", json={
         "name": "Old Name", "category": "Fashion", "unit_price_fcfa": 5000,

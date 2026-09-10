@@ -42,8 +42,8 @@ def order_detail(id_or_ref):
 
 @orders_bp.route("/orders", methods=["GET"])
 def order_list():
-    page = max(request.args.get("page", default=1, type=int) or 1, 1)
-    per_page = max(request.args.get("per_page", default=20, type=int) or 20, 1)
+    page = max(request.args.get("page", default=1, type=int), 1)
+    per_page = min(max(request.args.get("per_page", default=20, type=int), 1), 100)
 
     orders, total_records = list_orders(
         get_db(),
