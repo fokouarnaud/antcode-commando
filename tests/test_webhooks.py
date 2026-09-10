@@ -290,30 +290,33 @@ def test_webhook_route_returns_500_for_unknown_provider(client):
 def geniuspay_payload(order_id="ECM-00001", transaction_id="GENIUSPAY-TX-0001", amount=12000):
     return {
         "data": {
-            "transaction_id": transaction_id,
-            "amount": amount,
-            "metadata": {"order_id": order_id},
+            "transaction": {
+                "reference": transaction_id,
+                "amount": amount,
+                "metadata": {"order_id": order_id},
+            },
         },
     }
 
 
-def sign_geniuspay(secret, timestamp, raw_body_string):
-    message = f"{timestamp}.{raw_body_string}".encode()
-    return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
+def sign_geniuspay(secret, raw_body_string):
+    """GeniusPay signs the raw request body alone -- same scheme as every
+    other provider, no timestamp involved (per GeniusPay's own API docs).
+    """
+    return hmac.new(secret.encode(), raw_body_string.encode(), hashlib.sha256).hexdigest()
 
 
-def post_geniuspay(client, secret, payload, event="payment.success", timestamp="1700000000", signature=None):
+def post_geniuspay(client, secret, payload, event="payment.success", signature=None):
     raw_body_string = json.dumps(payload)
     if signature is None:
-        signature = sign_geniuspay(secret, timestamp, raw_body_string)
+        signature = sign_geniuspay(secret, raw_body_string)
     return client.post(
         "/webhook/geniuspay",
         data=raw_body_string.encode(),
         content_type="application/json",
         headers={
-            "X-Webhook-Signature": signature,
-            "X-Webhook-Timestamp": timestamp,
-            "X-Webhook-Event": event,
+            "X-GeniusPay-Signature": signature,
+            "X-GeniusPay-Event": event,
         },
     )
 
@@ -325,20 +328,16 @@ def test_geniuspay_webhook_rejects_request_with_missing_signature(client, app):
         "/webhook/geniuspay",
         data=raw_body_string.encode(),
         content_type="application/json",
-        headers={"X-Webhook-Timestamp": "1700000000", "X-Webhook-Event": "payment.success"},
+        headers={"X-GeniusPay-Event": "payment.success"},
     )
 
     assert response.status_code == 401
 
 
 def test_geniuspay_webhook_rejects_tampered_body_even_with_valid_looking_signature(client, app):
-    """The signed message is f"{timestamp}.{raw_body}" -- proves the body,
-    not just the timestamp, is covered by the signature.
-    """
     secret = app.config["GENIUSPAY_WEBHOOK_SECRET"]
-    timestamp = "1700000000"
     original_body = json.dumps(geniuspay_payload(amount=12000))
-    signature = sign_geniuspay(secret, timestamp, original_body)
+    signature = sign_geniuspay(secret, original_body)
     tampered_body = json.dumps(geniuspay_payload(amount=999999999))
 
     response = client.post(
@@ -346,29 +345,32 @@ def test_geniuspay_webhook_rejects_tampered_body_even_with_valid_looking_signatu
         data=tampered_body.encode(),
         content_type="application/json",
         headers={
-            "X-Webhook-Signature": signature,
-            "X-Webhook-Timestamp": timestamp,
-            "X-Webhook-Event": "payment.success",
+            "X-GeniusPay-Signature": signature,
+            "X-GeniusPay-Event": "payment.success",
         },
     )
 
     assert response.status_code == 401
 
 
-def test_geniuspay_webhook_rejects_mismatched_timestamp_even_with_valid_body_signature(client, app):
-    """The timestamp is part of the signed message too -- replaying a valid
-    body+signature pair under a different X-Webhook-Timestamp must fail.
+def test_geniuspay_webhook_accepts_request_with_no_timestamp_header(client, app):
+    """GeniusPay's HMAC covers the raw body only, not a timestamp -- the
+    X-GeniusPay-Timestamp header (when a caller sends it) is informational
+    and must not be required or checked for verification purposes.
     """
     secret = app.config["GENIUSPAY_WEBHOOK_SECRET"]
     payload = geniuspay_payload()
     raw_body_string = json.dumps(payload)
-    signature = sign_geniuspay(secret, "1700000000", raw_body_string)
+    signature = sign_geniuspay(secret, raw_body_string)
 
-    response = post_geniuspay(
-        client, secret, payload, timestamp="1700000999", signature=signature
+    response = client.post(
+        "/webhook/geniuspay",
+        data=raw_body_string.encode(),
+        content_type="application/json",
+        headers={"X-GeniusPay-Signature": signature, "X-GeniusPay-Event": "payment.success"},
     )
 
-    assert response.status_code == 401
+    assert response.status_code == 200
 
 
 def test_geniuspay_webhook_processes_payment_success_event_and_marks_order_paid(client, app):

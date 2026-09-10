@@ -21,8 +21,11 @@ def test_initiate_geniuspay_payment_returns_checkout_url_and_reference_on_succes
     mock_post.return_value = Mock(
         status_code=201,
         json=Mock(return_value={
-            "checkout_url": "https://geniuspay.ci/pay/abc123",
-            "reference": "GPAY-REF-001",
+            "success": True,
+            "data": {
+                "checkout_url": "https://geniuspay.ci/pay/abc123",
+                "reference": "GPAY-REF-001",
+            },
         }),
     )
 
@@ -49,7 +52,7 @@ def test_initiate_geniuspay_payment_returns_checkout_url_and_reference_on_succes
 def test_initiate_geniuspay_payment_omits_customer_field_when_not_given(mock_post, app_context):
     mock_post.return_value = Mock(
         status_code=201,
-        json=Mock(return_value={"checkout_url": "https://geniuspay.ci/pay/xyz"}),
+        json=Mock(return_value={"success": True, "data": {"checkout_url": "https://geniuspay.ci/pay/xyz"}}),
     )
 
     initiate_geniuspay_payment(7, 5000)
@@ -62,7 +65,7 @@ def test_initiate_geniuspay_payment_omits_customer_field_when_not_given(mock_pos
 def test_initiate_geniuspay_payment_customer_object_only_includes_given_fields(mock_post, app_context):
     mock_post.return_value = Mock(
         status_code=201,
-        json=Mock(return_value={"checkout_url": "https://geniuspay.ci/pay/xyz"}),
+        json=Mock(return_value={"success": True, "data": {"checkout_url": "https://geniuspay.ci/pay/xyz"}}),
     )
 
     initiate_geniuspay_payment(7, 5000, customer_phone="+237690000002")
@@ -81,7 +84,9 @@ def test_initiate_geniuspay_payment_raises_on_non_201_status(mock_post, app_cont
 
 @patch("requests.post")
 def test_initiate_geniuspay_payment_raises_when_checkout_url_missing(mock_post, app_context):
-    mock_post.return_value = Mock(status_code=201, json=Mock(return_value={}), text="{}")
+    mock_post.return_value = Mock(
+        status_code=201, json=Mock(return_value={"success": True, "data": {}}), text='{"success": true, "data": {}}'
+    )
 
     with pytest.raises(GeniusPayError):
         initiate_geniuspay_payment(42, 15000)
@@ -91,14 +96,18 @@ def test_initiate_geniuspay_payment_raises_when_checkout_url_missing(mock_post, 
 def test_initiate_geniuspay_payment_falls_back_to_payment_url_when_checkout_url_missing(
     mock_post, app_context
 ):
-    """Some GeniusPay payment methods return `payment_url` instead of
-    `checkout_url` -- both must resolve to the same result field.
+    """GeniusPay's "Direct" mode (an explicit payment_method) returns
+    data.payment_url instead of data.checkout_url -- both must resolve to
+    the same result field.
     """
     mock_post.return_value = Mock(
         status_code=201,
         json=Mock(return_value={
-            "payment_url": "https://geniuspay.ci/pay/via-payment-url",
-            "reference": "GPAY-REF-002",
+            "success": True,
+            "data": {
+                "payment_url": "https://geniuspay.ci/pay/via-payment-url",
+                "reference": "GPAY-REF-002",
+            },
         }),
     )
 
@@ -117,9 +126,12 @@ def test_initiate_geniuspay_payment_prefers_checkout_url_over_payment_url_when_b
     mock_post.return_value = Mock(
         status_code=201,
         json=Mock(return_value={
-            "checkout_url": "https://geniuspay.ci/pay/checkout",
-            "payment_url": "https://geniuspay.ci/pay/payment",
-            "reference": "GPAY-REF-003",
+            "success": True,
+            "data": {
+                "checkout_url": "https://geniuspay.ci/pay/checkout",
+                "payment_url": "https://geniuspay.ci/pay/payment",
+                "reference": "GPAY-REF-003",
+            },
         }),
     )
 

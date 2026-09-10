@@ -21,7 +21,7 @@
         "type": "apiKey",
         "in": "header",
         "name": "X-Provider-Signature",
-        "description": "Placeholder name for whichever signature header the {provider} path segment actually expects, resolved dynamically from _PROVIDER_CONFIG (app/routes/webhooks.py): momo -> X-Momo-Signature/MOMO_WEBHOOK_SECRET, orange -> X-Orange-Signature/ORANGE_WEBHOOK_SECRET, campay -> X-Campay-Signature/CAMPAY_WEBHOOK_SECRET, smobilpay -> X-Smobilpay-Signature/SMOBILPAY_WEBHOOK_SECRET, geniuspay -> X-Webhook-Signature/GENIUSPAY_WEBHOOK_SECRET. All of them are a hex-encoded HMAC-SHA256 of the raw request body except geniuspay, which signs f\"{X-Webhook-Timestamp}.{raw_request_body}\" instead (also requires the X-Webhook-Timestamp and X-Webhook-Event headers)."
+        "description": "Placeholder name for whichever signature header the {provider} path segment actually expects, resolved dynamically from _PROVIDER_CONFIG (app/routes/webhooks.py): momo -> X-Momo-Signature/MOMO_WEBHOOK_SECRET, orange -> X-Orange-Signature/ORANGE_WEBHOOK_SECRET, campay -> X-Campay-Signature/CAMPAY_WEBHOOK_SECRET, smobilpay -> X-Smobilpay-Signature/SMOBILPAY_WEBHOOK_SECRET, geniuspay -> X-GeniusPay-Signature/GENIUSPAY_WEBHOOK_SECRET (also requires the X-GeniusPay-Event header). Every provider's signature is a hex-encoded HMAC-SHA256 of the raw request body alone."
       }
     },
     "schemas": {
@@ -152,19 +152,25 @@
       "GeniusPayCallback": {
         "type": "object",
         "required": ["data"],
-        "description": "The outcome (paid vs. failed) is carried by the X-Webhook-Event header (payment.success / payment.failed), not a body field.",
+        "description": "The outcome (paid vs. failed) is carried by the X-GeniusPay-Event header (payment.success / payment.failed), not a body field.",
         "properties": {
           "data": {
             "type": "object",
-            "required": ["transaction_id", "amount", "metadata"],
+            "required": ["transaction"],
             "properties": {
-              "transaction_id": { "type": "string", "example": "GENIUSPAY-TX-0001" },
-              "amount": { "type": "integer", "example": 12000 },
-              "metadata": {
+              "transaction": {
                 "type": "object",
-                "required": ["order_id"],
+                "required": ["reference", "amount", "metadata"],
                 "properties": {
-                  "order_id": { "type": "string", "example": "ECM-00001" }
+                  "reference": { "type": "string", "example": "GENIUSPAY-TX-0001" },
+                  "amount": { "type": "integer", "example": 12000 },
+                  "metadata": {
+                    "type": "object",
+                    "required": ["order_id"],
+                    "properties": {
+                      "order_id": { "type": "string", "example": "ECM-00001" }
+                    }
+                  }
                 }
               }
             }
@@ -635,7 +641,7 @@
       "post": {
         "tags": ["Payment Checkout & Webhooks"],
         "summary": "Payment callback for the named provider",
-        "description": "Single dynamic entry point for every provider's payment callback -- momo, orange, campay, smobilpay, and geniuspay. _webhook() (app/routes/webhooks.py) resolves that provider's own secret, signature header, and (geniuspay only) timestamp/event headers from _PROVIDER_CONFIG. Idempotent, keyed on (provider, external_transaction_id): replaying the same transaction id (e.g. after an MTN retry following a 3G timeout in Douala/Yaounde) returns already_processed instead of double-charging the order. For geniuspay, order_id is read from data.metadata.order_id, the order is marked Paid only when X-Webhook-Event is payment.success, and a webhook.test event is acknowledged without touching orders. Adding a new provider only means adding an entry to _PROVIDER_CONFIG -- not a new route.",
+        "description": "Single dynamic entry point for every provider's payment callback -- momo, orange, campay, smobilpay, and geniuspay. _webhook() (app/routes/webhooks.py) resolves that provider's own secret, signature header, and (geniuspay only) event header from _PROVIDER_CONFIG. Idempotent, keyed on (provider, external_transaction_id): replaying the same transaction id (e.g. after an MTN retry following a 3G timeout in Douala/Yaounde) returns already_processed instead of double-charging the order. For geniuspay, order_id is read from data.transaction.metadata.order_id, the order is marked Paid only when X-GeniusPay-Event is payment.success, and a webhook.test event is acknowledged without touching orders. Adding a new provider only means adding an entry to _PROVIDER_CONFIG -- not a new route.",
         "security": [{ "providerSignature": [] }],
         "parameters": [
           {
@@ -649,14 +655,7 @@
             }
           },
           {
-            "name": "X-Webhook-Timestamp",
-            "in": "header",
-            "required": false,
-            "description": "geniuspay only: Unix timestamp GeniusPay signed alongside the body; part of the HMAC message.",
-            "schema": { "type": "string", "example": "1700000000" }
-          },
-          {
-            "name": "X-Webhook-Event",
+            "name": "X-GeniusPay-Event",
             "in": "header",
             "required": false,
             "description": "geniuspay only: event type. payment.success marks the order Paid; webhook.test is acknowledged without touching orders; anything else leaves it unpaid.",
@@ -673,7 +672,7 @@
         },
         "responses": {
           "200": { "description": "Processed, already processed (idempotent replay), or a geniuspay webhook.test acknowledgement" },
-          "401": { "description": "Missing, invalid, or payload/timestamp-mismatched signature for the named provider" },
+          "401": { "description": "Missing, invalid, or body-mismatched signature for the named provider" },
           "404": { "description": "order_id does not exist" },
           "500": { "description": "provider names a value with no entry in _PROVIDER_CONFIG (misconfiguration)" }
         }
