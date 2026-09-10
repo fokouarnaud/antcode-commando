@@ -37,12 +37,12 @@ def app(tmp_path):
     conn.execute(
         "INSERT INTO orders (order_id, customer_id, address_id, product_id, quantity, "
         "unit_price_fcfa, delivery_status, payment_status) "
-        "VALUES ('ECM-00001', 1, 1, 1, 1, 75000, 'Pending', 'Pending')"
+        "VALUES ('ECM-00001', 1, 1, 1, 1, 75000, 'Pending', 'Unpaid')"
     )
     conn.execute(
         "INSERT INTO orders (order_id, customer_id, address_id, product_id, quantity, "
         "unit_price_fcfa, delivery_status, payment_status) "
-        "VALUES ('ECM-00002', 1, 1, 1, 1, 75000, 'Shipped', 'Pending')"
+        "VALUES ('ECM-00002', 1, 1, 1, 1, 75000, 'Shipped', 'Unpaid')"
     )
     conn.commit()
     conn.close()

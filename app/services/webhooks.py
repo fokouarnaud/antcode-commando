@@ -19,8 +19,8 @@ class OrderNotFoundError(Exception):
 
 
 _STATUS_MAP = {
-    "SUCCESSFUL": ("Successful", "Paid"),
-    "FAILED": ("Failed", "Failed"),
+    "SUCCESSFUL": ("completed", "Paid"),
+    "FAILED": ("failed", "Unpaid"),
 }
 
 _GENIUSPAY_EVENT_STATUS = {
@@ -79,7 +79,7 @@ def process_momo_callback(conn, payload):
     if order is None:
         raise OrderNotFoundError(order_id)
 
-    payment_status, order_payment_status = _STATUS_MAP.get(status_raw, ("Pending", "Pending"))
+    payment_status, order_payment_status = _STATUS_MAP.get(status_raw, ("pending", "Unpaid"))
 
     cursor = conn.execute(
         format_query(

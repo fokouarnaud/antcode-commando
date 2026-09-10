@@ -46,7 +46,7 @@ def payment_create():
             payload.get("provider"),
             payload.get("external_transaction_id"),
             payload.get("amount_fcfa"),
-            payload.get("status", "Pending"),
+            payload.get("status", "pending"),
         )
     except PaymentValidationError as exc:
         return jsonify({"error": str(exc)}), 400

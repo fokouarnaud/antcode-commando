@@ -72,7 +72,12 @@ CREATE TABLE orders (
     quantity         INTEGER NOT NULL,
     unit_price_fcfa  INTEGER NOT NULL,
     delivery_status  TEXT NOT NULL DEFAULT 'Pending',
-    payment_status   TEXT NOT NULL DEFAULT 'Pending',
+    -- payment_status is the order's global payment visibility, not the
+    -- state of any one transactional attempt: it is strictly binary
+    -- ('Paid' / 'Unpaid'), flipping to 'Paid' only once a payment attempt
+    -- resolves as 'completed'. A failed or still-pending attempt leaves it
+    -- 'Unpaid' -- see payments.status for the attempt's own state.
+    payment_status   TEXT NOT NULL DEFAULT 'Unpaid',
     created_at       TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
     updated_at       TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
 );
@@ -86,7 +91,9 @@ CREATE TABLE payments (
     provider                 TEXT NOT NULL,
     external_transaction_id  TEXT NOT NULL,
     amount_fcfa              INTEGER NOT NULL,
-    status                   TEXT NOT NULL DEFAULT 'Pending',
+    -- status is the transactional state of this specific payment
+    -- execution attempt: 'pending' / 'completed' / 'failed'.
+    status                   TEXT NOT NULL DEFAULT 'pending',
     received_at              TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
     UNIQUE (provider, external_transaction_id)
 );

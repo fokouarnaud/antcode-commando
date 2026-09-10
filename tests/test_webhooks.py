@@ -105,7 +105,7 @@ def test_momo_webhook_processes_valid_callback_and_marks_order_paid(client, app)
     conn = get_connection(app.config["DATABASE_PATH"])
     payment = conn.execute("SELECT * FROM payments").fetchone()
     assert payment["external_transaction_id"] == "MOMO-TX-0001"
-    assert payment["status"] == "Successful"
+    assert payment["status"] == "completed"
     order = conn.execute(
         "SELECT payment_status FROM orders WHERE order_id = ?", ("ECM-00001",)
     ).fetchone()
@@ -167,7 +167,7 @@ def test_orange_webhook_processes_valid_callback_and_marks_order_paid(client, ap
         "SELECT * FROM payments WHERE external_transaction_id = 'ORANGE-TX-0001'"
     ).fetchone()
     assert payment["provider"] == "orange"
-    assert payment["status"] == "Successful"
+    assert payment["status"] == "completed"
     order = conn.execute(
         "SELECT payment_status FROM orders WHERE order_id = ?", ("ECM-00002",)
     ).fetchone()
@@ -383,7 +383,7 @@ def test_geniuspay_webhook_processes_payment_success_event_and_marks_order_paid(
     ).fetchone()
     assert payment["provider"] == "geniuspay"
     assert payment["amount_fcfa"] == 12000
-    assert payment["status"] == "Successful"
+    assert payment["status"] == "completed"
     order = conn.execute(
         "SELECT payment_status FROM orders WHERE order_id = ?", ("ECM-00001",)
     ).fetchone()
@@ -404,7 +404,7 @@ def test_geniuspay_webhook_does_not_mark_order_paid_for_non_success_event(client
     order = conn.execute(
         "SELECT payment_status FROM orders WHERE order_id = ?", ("ECM-00001",)
     ).fetchone()
-    assert order["payment_status"] == "Failed"
+    assert order["payment_status"] == "Unpaid"
 
 
 def test_geniuspay_webhook_does_not_double_process_retried_callback(client, app):
@@ -494,7 +494,7 @@ def test_simulate_carrier_webhook_processes_momo_callback_when_debug_enabled(app
         "SELECT * FROM payments WHERE external_transaction_id = 'SIM-TX-01'"
     ).fetchone()
     assert payment["provider"] == "momo"
-    assert payment["status"] == "Successful"
+    assert payment["status"] == "completed"
     order = conn.execute(
         "SELECT payment_status FROM orders WHERE order_id = ?", ("ECM-00001",)
     ).fetchone()

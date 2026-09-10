@@ -43,8 +43,9 @@
           },
           "payment_status": {
             "type": "string",
+            "description": "Global payment visibility for the order (binary) -- see Payment.status for the transactional state of an individual attempt.",
             "example": "Paid",
-            "enum": ["Pending", "Paid", "Failed"]
+            "enum": ["Paid", "Unpaid"]
           }
         }
       },
@@ -99,8 +100,9 @@
           "amount_fcfa": { "type": "integer", "example": 75000 },
           "status": {
             "type": "string",
-            "example": "Successful",
-            "enum": ["Pending", "Successful", "Failed"]
+            "description": "Transactional state of this specific payment execution attempt.",
+            "example": "completed",
+            "enum": ["pending", "completed", "failed"]
           },
           "received_at": { "type": "string", "format": "date-time" }
         }
@@ -118,7 +120,7 @@
                 "properties": {
                   "order_id": { "type": "string", "example": "ECM-00001" },
                   "delivery_status": { "type": "string", "enum": ["Pending", "Shipped", "Delivered"] },
-                  "payment_status": { "type": "string", "enum": ["Pending", "Paid", "Failed"] },
+                  "payment_status": { "type": "string", "enum": ["Paid", "Unpaid"] },
                   "customer_name": { "type": "string", "example": "Amina Njoya" },
                   "customer_phone": { "type": "string", "example": "+237690000001" }
                 }
@@ -296,7 +298,7 @@
                 "type": "object",
                 "properties": {
                   "delivery_status": { "type": "string", "enum": ["Pending", "Shipped", "Delivered"] },
-                  "payment_status": { "type": "string", "enum": ["Pending", "Paid", "Failed"] }
+                  "payment_status": { "type": "string", "enum": ["Paid", "Unpaid"] }
                 }
               }
             }
@@ -553,8 +555,8 @@
                   "amount_fcfa": { "type": "integer", "example": 75000 },
                   "status": {
                     "type": "string",
-                    "enum": ["Pending", "Successful", "Failed"],
-                    "default": "Pending"
+                    "enum": ["pending", "completed", "failed"],
+                    "default": "pending"
                   }
                 }
               }
@@ -603,7 +605,7 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "status": { "type": "string", "enum": ["Pending", "Successful", "Failed"] },
+                  "status": { "type": "string", "enum": ["pending", "completed", "failed"] },
                   "external_transaction_id": { "type": "string" }
                 }
               }

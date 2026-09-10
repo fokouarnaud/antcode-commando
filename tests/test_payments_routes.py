@@ -21,21 +21,21 @@ def test_create_payment_returns_201(client):
     assert body["provider"] == "geniuspay"
     assert body["external_transaction_id"] == "MTX-A1B2C3D4E5"
     assert body["amount_fcfa"] == 75000
-    assert body["status"] == "Pending"
+    assert body["status"] == "pending"
     assert "payment_id" in body
 
 
 def test_create_payment_defaults_status_to_pending_when_omitted(client):
     response = create_payment(client)
 
-    assert response.get_json()["status"] == "Pending"
+    assert response.get_json()["status"] == "pending"
 
 
 def test_create_payment_accepts_explicit_status(client):
-    response = create_payment(client, status="Successful")
+    response = create_payment(client, status="completed")
 
     assert response.status_code == 201
-    assert response.get_json()["status"] == "Successful"
+    assert response.get_json()["status"] == "completed"
 
 
 def test_create_payment_returns_400_for_missing_required_field(client):
@@ -125,10 +125,10 @@ def test_get_payment_by_unknown_transaction_id_returns_404(client):
 def test_update_payment_changes_status(client):
     created = create_payment(client).get_json()
 
-    response = client.put(f"/payments/{created['payment_id']}", json={"status": "Successful"})
+    response = client.put(f"/payments/{created['payment_id']}", json={"status": "completed"})
 
     assert response.status_code == 200
-    assert response.get_json()["status"] == "Successful"
+    assert response.get_json()["status"] == "completed"
 
 
 def test_update_payment_changes_external_transaction_id(client):
@@ -162,7 +162,7 @@ def test_update_payment_returns_409_when_new_reference_collides_with_another_pay
 
 
 def test_update_payment_returns_404_for_unknown_id(client):
-    response = client.put("/payments/9999", json={"status": "Successful"})
+    response = client.put("/payments/9999", json={"status": "completed"})
 
     assert response.status_code == 404
 

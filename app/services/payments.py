@@ -12,7 +12,7 @@ _PAYMENT_COLUMNS = (
     "payment_id, order_id, provider, external_transaction_id, amount_fcfa, status, received_at"
 )
 
-_VALID_STATUSES = {"Pending", "Successful", "Failed"}
+_VALID_STATUSES = {"pending", "completed", "failed"}
 
 
 class PaymentValidationError(Exception):
@@ -102,7 +102,7 @@ def _conflicts_with_another_payment(conn, provider, external_transaction_id, exc
     return row["payment_id"] != exclude_payment_id
 
 
-def create_payment(conn, order_id, provider, external_transaction_id, amount_fcfa, status="Pending"):
+def create_payment(conn, order_id, provider, external_transaction_id, amount_fcfa, status="pending"):
     if not order_id or not provider or not external_transaction_id:
         raise PaymentValidationError(
             "'order_id', 'provider', and 'external_transaction_id' are required"

@@ -29,7 +29,7 @@ def test_get_order_by_transaction_reference_returns_order_details(client, app):
     conn = get_connection(app.config["DATABASE_PATH"])
     conn.execute(
         "INSERT INTO payments (order_id, provider, external_transaction_id, amount_fcfa, status) "
-        "VALUES ('ECM-00001', 'geniuspay', 'MTX-A1B2C3D4E5', 12000, 'Successful')"
+        "VALUES ('ECM-00001', 'geniuspay', 'MTX-A1B2C3D4E5', 12000, 'completed')"
     )
     conn.commit()
 
@@ -168,7 +168,7 @@ def test_sync_inserts_new_orders_and_reports_counts(client, app):
         "SELECT delivery_status, payment_status FROM orders WHERE order_id = 'OFFLINE-0001'"
     ).fetchone()
     assert order["delivery_status"] == "Pending"
-    assert order["payment_status"] == "Pending"
+    assert order["payment_status"] == "Unpaid"
 
 
 def test_sync_is_idempotent_on_replayed_batch(client, app):

@@ -4,7 +4,7 @@ _DEFAULT_CITY = "Douala"
 _ORDER_ID_PREFIX = "ECM-"
 
 _VALID_DELIVERY_STATUSES = {"Pending", "Shipped", "Delivered"}
-_VALID_PAYMENT_STATUSES = {"Pending", "Paid", "Failed"}
+_VALID_PAYMENT_STATUSES = {"Paid", "Unpaid"}
 
 _ORDER_DETAIL_COLUMNS = (
     "o.order_id, o.customer_id, o.address_id, o.product_id, o.quantity, "
@@ -298,7 +298,7 @@ def sync_offline_orders(conn, orders):
                 order.get("quantity", 1),
                 unit_price_fcfa,
                 order.get("delivery_status", "Pending"),
-                order.get("payment_status", "Pending"),
+                order.get("payment_status", "Unpaid"),
             ),
         )
         synced += 1
